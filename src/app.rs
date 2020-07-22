@@ -67,9 +67,14 @@ impl State {
         let render_pipeline = render::RenderPipeline::new(&device);
 
         // ---- Buffers ----
+        let viewport_height = 2.0;
+        let ar = size.width as f32 / size.height as f32;
         let globals = compute::Globals {
             camera_pos: [0.0, 0.0, 0.0, 0.0],
+            viewport: [ar * viewport_height, viewport_height],
+
             window_size: [size.width as f32, size.height as f32],
+            aspect_ratio: ar
         };
         let globals_buffer = device.create_buffer_with_data(
             bytemuck::cast_slice(&[globals]),
@@ -113,6 +118,35 @@ impl State {
         self.sc_desc.width = new_size.width;
         self.sc_desc.height = new_size.height;
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
+
+        // Update buffers
+        let viewport_height = 2.0;
+        let ar = new_size.width as f32 / new_size.height as f32;
+        self.globals = compute::Globals {
+            camera_pos: [0.0, 0.0, 0.0, 0.0],
+            viewport: [ar * viewport_height, viewport_height],
+            
+            window_size: [new_size.width as f32, new_size.height as f32],
+            aspect_ratio: ar
+        };
+
+        let output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Output texture"),
+            size: wgpu::Extent3d {
+                width: new_size.width,
+                height: new_size.height,
+                depth: 1,
+            },
+            array_layer_count: 1,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsage::STORAGE,
+        });
+        self.output_texture = output_texture.create_default_view();
+
+        self.render();
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {

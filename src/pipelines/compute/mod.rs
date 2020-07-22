@@ -2,7 +2,10 @@
 #[derive(Clone, Copy, Debug)]
 pub struct Globals {
     pub camera_pos: [f32; 4],
+    pub viewport: [f32; 2],
+
     pub window_size: [f32; 2],
+    pub aspect_ratio: f32,
 }
 
 unsafe impl bytemuck::Pod for Globals {}
