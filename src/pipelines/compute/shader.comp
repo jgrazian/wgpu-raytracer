@@ -4,13 +4,23 @@ layout(local_size_x = 32, local_size_y = 32) in;
 
 layout(set = 0, binding = 0, std140) uniform Globals {
     vec3 camera_origin;
+    vec2 window_size;
 }
 globals;
 
 layout(set = 0, binding = 1, rgba32f) uniform image2D output_image;
 
 void main() {
+    const float width = globals.window_size.x;
+    const float height = globals.window_size.y;
+
+    if (gl_GlobalInvocationID.x >= width || gl_GlobalInvocationID.y >= height) {
+        return;
+    }
+
     const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);
 
-    imageStore(output_image, pixel_coordinates, vec4(1.0, 200.0, 1.0, 1.0));
+    vec4 pixel = vec4(gl_GlobalInvocationID.x / width, gl_GlobalInvocationID.y / height, 0.2, 1.0);
+
+    imageStore(output_image, pixel_coordinates, pixel);
 }

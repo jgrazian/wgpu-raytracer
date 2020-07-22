@@ -1,7 +1,8 @@
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Globals {
-    pub camera_pos: [f32; 3],
+    pub camera_pos: [f32; 4],
+    pub window_size: [f32; 2],
 }
 
 unsafe impl bytemuck::Pod for Globals {}
@@ -37,10 +38,6 @@ impl ComputePipeline {
                         format: wgpu::TextureFormat::Rgba32Float,
                         readonly: false,
                     },
-                    // ty: wgpu::BindingType::StorageBuffer {
-                    //     dynamic: false,
-                    //     readonly: false,
-                    // },
                 },
             ],
         });

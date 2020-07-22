@@ -26,10 +26,6 @@ impl RenderPipeline {
                     component_type: wgpu::TextureComponentType::Float,
                     readonly: false,
                 },
-                // ty: wgpu::BindingType::StorageBuffer {
-                //     dynamic: false,
-                //     readonly: false,
-                // },
             }],
         });
 

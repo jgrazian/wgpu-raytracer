@@ -25,8 +25,6 @@ pub struct State {
 impl State {
     pub async fn new(window: &Window) -> Self {
         let size = window.inner_size();
-        // let num_pixels = size.width * size.height;
-        // let pixels: Vec<Pixel> = vec![Default::default(); num_pixels as usize];
 
         // ---- Hardware ----
         // Create Surface
@@ -64,13 +62,14 @@ impl State {
         };
         let swap_chain = device.create_swap_chain(&surface, &sc_desc);
 
-        // Load pipelines
+        // ---- Pipelines ----
         let compute_pipeline = compute::ComputePipeline::new(&device);
         let render_pipeline = render::RenderPipeline::new(&device);
 
-        // Buffers
+        // ---- Buffers ----
         let globals = compute::Globals {
-            camera_pos: [0.0, 0.0, 0.0],
+            camera_pos: [0.0, 0.0, 0.0, 0.0],
+            window_size: [size.width as f32, size.height as f32],
         };
         let globals_buffer = device.create_buffer_with_data(
             bytemuck::cast_slice(&[globals]),
@@ -80,8 +79,8 @@ impl State {
         let output_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Output texture"),
             size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
+                width: size.width,
+                height: size.height,
                 depth: 1,
             },
             array_layer_count: 1,
@@ -92,11 +91,6 @@ impl State {
             usage: wgpu::TextureUsage::STORAGE,
         });
         let output_texture = output_texture.create_default_view();
-
-        // let output_texture = device.create_buffer_with_data(
-        //     bytemuck::cast_slice(&pixels),
-        //     wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC | wgpu::BufferUsage::COPY_DST,
-        // );
 
         Self {
             surface,
@@ -203,9 +197,9 @@ impl State {
                     load_op: wgpu::LoadOp::Clear,
                     store_op: wgpu::StoreOp::Store,
                     clear_color: wgpu::Color {
-                        r: 0.1,
-                        g: 0.1,
-                        b: 0.1,
+                        r: 0.0,
+                        g: 1.0,
+                        b: 0.0,
                         a: 1.0,
                     },
                 }],
