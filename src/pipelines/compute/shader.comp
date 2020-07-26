@@ -1,5 +1,26 @@
 #version 450
+#define COUNT 2
+#define FLT_MAX 3.402823466e+38
+#define FLT_MIN 1.175494351e-38
+// ---- Structs ----
+struct HitRec {
+    vec3 point;
+    vec3 normal;
+    float t;
+    bool front_face;
+};
 
+struct Ray {
+    vec3 orig;
+    vec3 dir;
+};
+
+struct Sphere {
+    vec3 center;
+    float radius;
+};
+
+// ---- Bind Buffers ----
 layout(local_size_x = 32, local_size_y = 32) in;
 
 layout(set = 0, binding = 0, std140) uniform Globals {
@@ -12,39 +33,72 @@ globals;
 
 layout(set = 0, binding = 1, rgba32f) uniform image2D output_image;
 
-// ---- Ray ----
-struct Ray {
-    vec3 orig;
-    vec3 dir;
-};
+// ---- Impl HitRec ----
+void set_face_normal(inout HitRec rec, Ray r, vec3 outward_normal) {
+    rec.front_face = dot(r.dir, outward_normal) < 0;
+    rec.normal = rec.front_face ? outward_normal :-outward_normal;
+}
 
+// ---- Impl Ray ----
 vec3 ray_at(Ray r, float t) {
     return (r.orig + t*r.dir);
 }
 
-// ---- Main Body ----
-
-float hit_sphere(vec3 center, float radius, Ray r) {
-    vec3 oc = r.orig - center;
+// ---- Impl Sphere ----
+bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
+    vec3 oc = r.orig - s.center;
     float a = dot(r.dir, r.dir);
-    float b = 2.0 * dot(oc, r.dir);
-    float c = dot(oc, oc) - radius*radius;
-    float discriminant = b*b - 4*a*c;
-    if (discriminant < 0) {
-        return -1.0;
-    } else {
-        return (-b - sqrt(discriminant) ) / (2.0*a);
+    float half_b = dot(oc, r.dir);
+    float c = dot(oc, oc) - s.radius*s.radius;
+    float discriminant = half_b*half_b - a*c;
+
+    if (discriminant > 0.0) {
+        float root = sqrt(discriminant);
+        float temp = (-half_b - root) / a;
+        if (temp < t_max && temp > t_min) {
+            rec.t = temp;
+            rec.point = ray_at(r, rec.t);
+            vec3 outward_normal = (rec.point - s.center) / s.radius;
+            set_face_normal(rec, r, outward_normal);
+            return true;
+        }
+
+        temp = (-half_b + root) / a;
+        if (temp < t_max && temp > t_min) {
+            rec.t = temp;
+            rec.point = ray_at(r, rec.t);
+            vec3 outward_normal = (rec.point - s.center) / s.radius;
+            set_face_normal(rec, r, outward_normal);
+            return true;
+        }
     }
+    return false;
 }
 
-vec3 ray_color(Ray r) {
-    float t = hit_sphere(vec3(0.0, 0.0, -1.0), 0.5, r);
-    if (t > 0.0) {
-        vec3 N = normalize(ray_at(r, t) - vec3(0.0, 0.0, -1.0));
-        return (0.5 * vec3(N.x + 1.0, N.y + 1.0, N.z + 1.0));
+// ---- Main Body ----
+bool hit_list_sphere(Sphere[COUNT] spheres, Ray r, float t_min, float t_max, inout HitRec rec) {
+    HitRec temp_rec;
+    bool hit_anything = false;
+    float closest_so_far = t_max;
+
+    for(int i = 0; i <= COUNT; i++) {
+        if (hit_sphere(spheres[i], r, t_min, closest_so_far, temp_rec)) {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
+        }
     }
+    return hit_anything;
+}
+
+vec3 ray_color(Ray r, Sphere[COUNT] spheres) {
+    HitRec rec;
+    if (hit_list_sphere(spheres, r, 0, FLT_MAX, rec)) {
+        return 0.5 * (rec.normal + vec3(1.0, 1.0, 1.0));
+    }
+
     vec3 unit_direction = normalize(r.dir);
-    t = 0.5*(unit_direction.y + 1.0);
+    float t = 0.5*(unit_direction.y + 1.0);
     return ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0));
 }
 
@@ -65,14 +119,13 @@ void main() {
     const vec3 vertical = vec3(0.0, globals.viewport.y, 0.0);
     const vec3 upper_left_corner = origin - horizontal * 0.5 + vertical * 0.5 - vec3(0, 0, 1.0);
 
+    const Sphere sphere_list[COUNT] = Sphere[COUNT](Sphere(vec3(0, 0, -1), 0.5), Sphere(vec3(0, -100.5, -1), 100));
+
     // Main loop
     Ray r = Ray(origin, upper_left_corner + u*horizontal - v*vertical - origin);
-    vec3 pixel_color = ray_color(r);
+    vec3 pixel_color = ray_color(r, sphere_list);
 
     // Output
     const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);
-
-    //vec4 pixel = vec4(gl_GlobalInvocationID.x / width, gl_GlobalInvocationID.y / height, 0.2, 1.0);
-
     imageStore(output_image, pixel_coordinates, vec4(pixel_color, 1.0));
 }
