@@ -25,13 +25,17 @@ layout(local_size_x = 32, local_size_y = 32) in;
 
 layout(set = 0, binding = 0, std140) uniform Globals {
     vec3 camera_origin;
+    float aspect_ratio;
     vec2 viewport;
     vec2 window_size;
-    float aspect_ratio;
 }
 globals;
 
 layout(set = 0, binding = 1, rgba32f) uniform image2D output_image;
+
+layout(set = 0, binding = 2, std140) uniform Spheres {
+    Sphere sphere_data[2];
+};
 
 // ---- Impl HitRec ----
 void set_face_normal(inout HitRec rec, Ray r, vec3 outward_normal) {
@@ -76,13 +80,13 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
 }
 
 // ---- Main Body ----
-bool hit_list_sphere(Sphere[COUNT] spheres, Ray r, float t_min, float t_max, inout HitRec rec) {
+bool hit_list_sphere(Ray r, float t_min, float t_max, inout HitRec rec) {
     HitRec temp_rec;
     bool hit_anything = false;
     float closest_so_far = t_max;
 
-    for(int i = 0; i <= COUNT; i++) {
-        if (hit_sphere(spheres[i], r, t_min, closest_so_far, temp_rec)) {
+    for(int i = 0; i < sphere_data.length(); ++i) {
+        if (hit_sphere(sphere_data[i], r, t_min, closest_so_far, temp_rec)) {
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
@@ -91,9 +95,9 @@ bool hit_list_sphere(Sphere[COUNT] spheres, Ray r, float t_min, float t_max, ino
     return hit_anything;
 }
 
-vec3 ray_color(Ray r, Sphere[COUNT] spheres) {
+vec3 ray_color(Ray r) {
     HitRec rec;
-    if (hit_list_sphere(spheres, r, 0, FLT_MAX, rec)) {
+    if (hit_list_sphere(r, 0, FLT_MAX, rec)) {
         return 0.5 * (rec.normal + vec3(1.0, 1.0, 1.0));
     }
 
@@ -114,16 +118,21 @@ void main() {
     }
 
     // Camera
-    const vec3 origin = vec3(0.0);
-    const vec3 horizontal = vec3(globals.viewport.x, 0.0, 0.0);
-    const vec3 vertical = vec3(0.0, globals.viewport.y, 0.0);
-    const vec3 upper_left_corner = origin - horizontal * 0.5 + vertical * 0.5 - vec3(0, 0, 1.0);
+    const vec3 lookat = vec3(0.0, 0.0, 0.0);
+    const vec3 lookfrom = globals.camera_origin;
+    const vec3 vup = vec3(0.0, 1.0, 0.0);
 
-    const Sphere sphere_list[COUNT] = Sphere[COUNT](Sphere(vec3(0, 0, -1), 0.5), Sphere(vec3(0, -100.5, -1), 100));
+    vec3 w = normalize(lookfrom - lookat);
+    vec3 uu = normalize(cross(vup, w));
+    vec3 vv = cross(w, uu);
+    vec3 origin = lookfrom;
+    vec3 horizontal = globals.viewport.x * uu;
+    vec3 vertical = globals.viewport.y * vv;
+    vec3 upper_left_corner = origin - horizontal/2.0 + vertical/2.0 - w;
 
     // Main loop
     Ray r = Ray(origin, upper_left_corner + u*horizontal - v*vertical - origin);
-    vec3 pixel_color = ray_color(r, sphere_list);
+    vec3 pixel_color = ray_color(r);
 
     // Output
     const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);

@@ -1,8 +1,8 @@
 use std::fmt;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-
-#[derive(Debug, PartialEq, Default, Clone, Copy)]
+#[repr(C)]
+#[derive(PartialEq, Default, Clone, Copy)]
 pub struct Vec3 {
     x: f32,
     y: f32,
