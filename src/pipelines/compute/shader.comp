@@ -1,23 +1,33 @@
 #version 450
-#define COUNT 2
+
 #define FLT_MAX 3.402823466e+38
 #define FLT_MIN 1.175494351e-38
+#define M_TWO_PI 6.28318530718
+#define MAX_SPHERES 1024
+#define MAX_MATERIALS 32
 // ---- Structs ----
 struct HitRec {
     vec3 point;
     vec3 normal;
     float t;
     bool front_face;
+    uint mat_ptr;
 };
 
 struct Ray {
-    vec3 orig;
-    vec3 dir;
+    vec3 origin;
+    vec3 direction;
 };
 
 struct Sphere {
     vec3 center;
     float radius;
+    uint mat_ptr;
+};
+
+struct Material {
+    vec3 albedo;
+    uint type;
 };
 
 // ---- Bind Buffers ----
@@ -28,31 +38,71 @@ layout(set = 0, binding = 0, std140) uniform Globals {
     float aspect_ratio;
     vec2 viewport;
     vec2 window_size;
-}
-globals;
+    float seed;
+    uint num_frames;
+} globals;
 
 layout(set = 0, binding = 1, rgba32f) uniform image2D output_image;
 
-layout(set = 0, binding = 2, std140) uniform Spheres {
-    Sphere sphere_data[2];
-};
+layout(set = 0, binding = 2, std140) buffer Spheres {
+    uint len;
+    Sphere data[MAX_SPHERES];
+} spheres;
+
+layout(set = 0, binding = 3, std140) uniform Materials {
+    uint len;
+    Material data[MAX_MATERIALS];
+} materials;
+
+// RNG
+float rand(inout float seed, vec2 pixel) {
+    float result = fract(sin(seed / 100.0f * dot(pixel, vec2(12.9898f, 78.233f))) * 43758.5453f);
+    seed += 1.0f;
+    return result;
+}
+
+vec2 rand2(inout float seed, vec2 pixel) {
+    return vec2(rand(seed, pixel), rand(seed, pixel));
+}
+
+vec3 rand3(inout float seed, vec2 pixel) {
+    vec3 p = 2.0 * vec3(rand(seed, pixel), rand(seed, pixel), rand(seed, pixel)) - vec3(1.0);
+    return normalize(p);
+}
+
+vec3 sample_sphere_uniform(vec2 s) {
+    float phi = M_TWO_PI * s.x;
+    float cos_theta = 1.0 - 2.0 * s.y;
+    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+
+    return vec3(cos(phi) * sin_theta, cos_theta, sin(phi) * sin_theta);
+}
+
+vec3 random_in_hemisphere(vec3 normal, vec2 s) {
+    vec3 in_unit_sphere = sample_sphere_uniform(s);
+    if (dot(in_unit_sphere, normal) > 0.0) { // In the same hemisphere as the normal
+        return in_unit_sphere;
+    } else {
+        return -in_unit_sphere;
+    }
+}
 
 // ---- Impl HitRec ----
 void set_face_normal(inout HitRec rec, Ray r, vec3 outward_normal) {
-    rec.front_face = dot(r.dir, outward_normal) < 0;
+    rec.front_face = dot(r.direction, outward_normal) < 0;
     rec.normal = rec.front_face ? outward_normal :-outward_normal;
 }
 
 // ---- Impl Ray ----
 vec3 ray_at(Ray r, float t) {
-    return (r.orig + t*r.dir);
+    return (r.origin + t*r.direction);
 }
 
 // ---- Impl Sphere ----
 bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
-    vec3 oc = r.orig - s.center;
-    float a = dot(r.dir, r.dir);
-    float half_b = dot(oc, r.dir);
+    vec3 oc = r.origin - s.center;
+    float a = dot(r.direction, r.direction);
+    float half_b = dot(oc, r.direction);
     float c = dot(oc, oc) - s.radius*s.radius;
     float discriminant = half_b*half_b - a*c;
 
@@ -64,6 +114,7 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
             rec.point = ray_at(r, rec.t);
             vec3 outward_normal = (rec.point - s.center) / s.radius;
             set_face_normal(rec, r, outward_normal);
+            rec.mat_ptr = s.mat_ptr;
             return true;
         }
 
@@ -73,6 +124,7 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
             rec.point = ray_at(r, rec.t);
             vec3 outward_normal = (rec.point - s.center) / s.radius;
             set_face_normal(rec, r, outward_normal);
+            rec.mat_ptr = s.mat_ptr;
             return true;
         }
     }
@@ -80,13 +132,13 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
 }
 
 // ---- Main Body ----
-bool hit_list_sphere(Ray r, float t_min, float t_max, inout HitRec rec) {
+bool hit_world(Ray r, float t_min, float t_max, inout HitRec rec) {
     HitRec temp_rec;
     bool hit_anything = false;
     float closest_so_far = t_max;
 
-    for(int i = 0; i < sphere_data.length(); ++i) {
-        if (hit_sphere(sphere_data[i], r, t_min, closest_so_far, temp_rec)) {
+    for(uint i = 0; i < spheres.len; ++i) {
+        if (hit_sphere(spheres.data[i], r, t_min, closest_so_far, temp_rec)) {
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
@@ -95,46 +147,76 @@ bool hit_list_sphere(Ray r, float t_min, float t_max, inout HitRec rec) {
     return hit_anything;
 }
 
-vec3 ray_color(Ray r) {
+vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
+    int depth = 0;
+    int max_depth = 10;
+
     HitRec rec;
-    if (hit_list_sphere(r, 0, FLT_MAX, rec)) {
-        return 0.5 * (rec.normal + vec3(1.0, 1.0, 1.0));
+
+    vec3 res = vec3(0.0);
+    float attenuation = 1.0;
+
+    while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec)) {
+        vec3 target;
+        if (materials.data[rec.mat_ptr].type == 1) { //metal
+            target = rec.point + reflect(r.direction, rec.normal);
+        } else { // Diffuse
+            target = rec.point + random_in_hemisphere(rec.normal, rand2(seed, pixel));
+        }
+        
+        r.origin = rec.point;
+        r.direction = target - rec.point;
+
+        attenuation *= 0.5;
+        res += attenuation * materials.data[rec.mat_ptr].albedo;
+        depth++;
     }
 
-    vec3 unit_direction = normalize(r.dir);
-    float t = 0.5*(unit_direction.y + 1.0);
-    return ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0));
+    bool hit_sky = depth < max_depth; //1 if we hit sky, 0 if max_depth is reached
+    float t = 0.5*(normalize(r.direction).y + 1.0);
+    res += attenuation * (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
+
+    float scale = 1.0 / float(depth + int(depth == 0));
+    return res * scale;
 }
 
 void main() {
     // Random init stuff
-    const float width = globals.window_size.x;
-    const float height = globals.window_size.y;
-    const float u = float(gl_GlobalInvocationID.x) / float(width - 1.0);
-    const float v = float(gl_GlobalInvocationID.y) / float(height - 1.0);
+    const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);
+    const vec2 image_size = globals.window_size;
+    const vec2 uv = vec2(pixel_coordinates) / image_size;
+    float seed = globals.seed;
 
-    if (gl_GlobalInvocationID.x >= width || gl_GlobalInvocationID.y >= height) {
+    const vec2 sample_pos = (vec2(pixel_coordinates) + rand2(seed, uv)) / image_size;
+
+    if (gl_GlobalInvocationID.x >= image_size.x || gl_GlobalInvocationID.y >= image_size.y) {
         return;
     }
 
     // Camera
-    const vec3 lookat = vec3(0.0, 0.0, 0.0);
-    const vec3 lookfrom = globals.camera_origin;
+    const vec3 look_at = vec3(0.0, 1.0, 0.0);
+    const vec3 look_from = globals.camera_origin;
     const vec3 vup = vec3(0.0, 1.0, 0.0);
 
-    vec3 w = normalize(lookfrom - lookat);
+    vec3 w = normalize(look_from - look_at);
     vec3 uu = normalize(cross(vup, w));
     vec3 vv = cross(w, uu);
-    vec3 origin = lookfrom;
     vec3 horizontal = globals.viewport.x * uu;
     vec3 vertical = globals.viewport.y * vv;
-    vec3 upper_left_corner = origin - horizontal/2.0 + vertical/2.0 - w;
+    vec3 upper_left_corner = look_from - horizontal/2.0 + vertical/2.0 - w;
 
     // Main loop
-    Ray r = Ray(origin, upper_left_corner + u*horizontal - v*vertical - origin);
-    vec3 pixel_color = ray_color(r);
+    vec3 ray_dir = upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - look_from;
+    Ray r = Ray(look_from, ray_dir);
+    vec3 pixel_color = ray_color(r, seed, uv);
 
     // Output
-    const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);
-    imageStore(output_image, pixel_coordinates, vec4(pixel_color, 1.0));
+    if (globals.num_frames == 0) {
+        imageStore(output_image, pixel_coordinates, vec4(pixel_color, 1.0));
+    } else {
+        vec4 current_color = imageLoad(output_image, pixel_coordinates);
+        vec4 new_color = vec4(current_color.xyz + (pixel_color.xyz - current_color.xyz) / float(globals.num_frames), 1.0);
+        imageStore(output_image, pixel_coordinates, new_color);
+    }
+
 }

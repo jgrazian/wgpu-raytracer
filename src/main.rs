@@ -1,6 +1,9 @@
 mod app;
-mod pipelines;
+mod geometry;
+mod globals;
+mod material;
 mod math;
+mod pipelines;
 
 use futures::executor::block_on;
 use winit::{
@@ -49,8 +52,7 @@ fn main() {
                     _ => {}
                 }
             }
-        },
-        
+        }
         _ => {}
     });
 }

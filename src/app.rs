@@ -1,11 +1,15 @@
-use cgmath::Vector3;
+use glam::{Vec2, Vec3};
+use rand;
 use winit::{event::WindowEvent, window::Window};
 
+use crate::geometry;
+use crate::globals;
+use crate::material;
 use crate::pipelines::*;
 
 struct MouseState {
     state: winit::event::ElementState,
-    position: [f32; 2],
+    position: Vec2,
 }
 
 pub struct State {
@@ -17,17 +21,21 @@ pub struct State {
     sc_desc: wgpu::SwapChainDescriptor,
     swap_chain: wgpu::SwapChain,
 
-    globals: compute::Globals,
+    globals: globals::Globals,
+    spheres: geometry::SphereBuffer,
+    materials: material::MaterialBuffer,
 
     globals_buffer: wgpu::Buffer,
     output_texture: wgpu::TextureView,
     spheres_buffer: wgpu::Buffer,
+    material_buffer: wgpu::Buffer,
 
     compute_pipeline: compute::ComputePipeline,
     render_pipeline: render::RenderPipeline,
 
     size: winit::dpi::PhysicalSize<u32>,
     mouse_state: MouseState,
+    dirty: bool,
 }
 
 impl State {
@@ -77,16 +85,13 @@ impl State {
         // ---- Buffers ----
         let viewport_height = 2.0;
         let ar = size.width as f32 / size.height as f32;
-        let globals = compute::Globals {
-            camera_pos: Vector3::<f32> {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
-            viewport: [ar * viewport_height, viewport_height],
-
-            window_size: [size.width as f32, size.height as f32],
+        let globals = globals::Globals {
+            camera_pos: Vec3::new(0.0, 0.0, 1.25),
+            viewport: Vec2::new(ar * viewport_height, viewport_height),
+            window_size: Vec2::new(size.width as f32, size.height as f32),
             aspect_ratio: ar,
+            rng_seed: rand::random(),
+            num_frames: 0,
         };
         let globals_buffer = device.create_buffer_with_data(
             bytemuck::cast_slice(&[globals]),
@@ -109,24 +114,30 @@ impl State {
         });
         let output_texture = output_texture.create_default_view();
 
-        let spheres = [
-            compute::Sphere {
-                center: [0.0, 0.0, 0.0],
-                radius: 0.5,
-            },
-            compute::Sphere {
-                center: [0.0, -100.5, -1.0],
-                radius: 100.0,
-            },
-        ];
+        let mut spheres = geometry::SphereBuffer {
+            spheres: vec![geometry::Sphere::new(Vec3::new(0.0, -100.0, 0.0), 100.0, 0)],
+        };
+        spheres.spheres.extend(make_sphereflake());
         let spheres_buffer = device.create_buffer_with_data(
-            bytemuck::cast_slice(&[spheres]),
+            spheres.to_buffer().as_slice(),
+            wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+        );
+
+        let materials = material::MaterialBuffer {
+            materials: vec![
+                material::Material::new([1.0, 0.7, 0.0], 0),
+                material::Material::new([0.1, 0.1, 0.1], 1),
+            ],
+        };
+        let material_buffer = device.create_buffer_with_data(
+            materials.to_buffer().as_slice(),
             wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         );
 
+        // Misc
         let mouse_state = MouseState {
             state: winit::event::ElementState::Released,
-            position: [0.0, 0.0],
+            position: Vec2::new(0.0, 0.0),
         };
 
         Self {
@@ -137,13 +148,17 @@ impl State {
             sc_desc,
             swap_chain,
             globals,
+            spheres,
+            materials,
             globals_buffer,
             output_texture,
             spheres_buffer,
+            material_buffer,
             compute_pipeline,
             render_pipeline,
             size,
             mouse_state,
+            dirty: false,
         }
     }
 
@@ -156,15 +171,13 @@ impl State {
         // Update buffers
         let viewport_height = 2.0;
         let ar = new_size.width as f32 / new_size.height as f32;
-        self.globals = compute::Globals {
-            camera_pos: Vector3::<f32> {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            viewport: [ar * viewport_height, viewport_height],
-            window_size: [new_size.width as f32, new_size.height as f32],
+        self.globals = globals::Globals {
+            camera_pos: self.globals.camera_pos,
+            viewport: Vec2::new(ar * viewport_height, viewport_height),
+            window_size: Vec2::new(new_size.width as f32, new_size.height as f32),
             aspect_ratio: ar,
+            rng_seed: rand::random(),
+            num_frames: 0,
         };
 
         let output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -191,16 +204,19 @@ impl State {
             WindowEvent::MouseInput { state, .. } => self.mouse_state.state = *state,
             WindowEvent::CursorMoved { position, .. } => {
                 if self.mouse_state.state == winit::event::ElementState::Pressed {
-                    let dx = position.x as f32 - self.mouse_state.position[0];
-                    let dy = position.y as f32 - self.mouse_state.position[1];
-
-                    let p0 = [position.x as f32, position.y as f32];
-                    let p1 = [self.mouse_state.position[0], self.mouse_state.position[1]];
-                    self.globals.arcball_rotate(p0, p1);
+                    self.dirty = true;
+                    let p1 = Vec2::new(position.x as f32, position.y as f32);
+                    self.globals.arcball_rotate(self.mouse_state.position, p1);
                 }
-
-                self.mouse_state.position = [position.x as f32, position.y as f32];
+                self.mouse_state.position = Vec2::new(position.x as f32, position.y as f32);
             }
+            WindowEvent::MouseWheel { delta, .. } => match delta {
+                winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                    self.dirty = true;
+                    self.globals.arcball_zoom(*y);
+                }
+                _ => return false,
+            },
             _ => return false,
         }
 
@@ -208,7 +224,11 @@ impl State {
     }
 
     pub fn update(&mut self) {
-        //unimplemented!()
+        self.globals.rng_seed = rand::random();
+        if self.dirty {
+            self.globals.num_frames = 0;
+            self.dirty = false;
+        }
     }
 
     pub fn render(&mut self) {
@@ -225,7 +245,7 @@ impl State {
 
         //Copy new data to GPU
         {
-            let globals_size = std::mem::size_of::<compute::Globals>();
+            let globals_size = std::mem::size_of::<globals::Globals>();
             let globals_buffer = self.device.create_buffer_with_data(
                 bytemuck::cast_slice(&[self.globals]),
                 wgpu::BufferUsage::COPY_SRC,
@@ -249,7 +269,7 @@ impl State {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer {
                         buffer: &self.globals_buffer,
-                        range: 0..std::mem::size_of::<compute::Globals>() as u64,
+                        range: 0..std::mem::size_of::<globals::Globals>() as u64,
                     },
                 },
                 wgpu::Binding {
@@ -260,7 +280,14 @@ impl State {
                     binding: 2,
                     resource: wgpu::BindingResource::Buffer {
                         buffer: &self.spheres_buffer,
-                        range: 0..(std::mem::size_of::<compute::Sphere>() * 2) as u64,
+                        range: 0..self.spheres.len() as u64,
+                    },
+                },
+                wgpu::Binding {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &self.material_buffer,
+                        range: 0..self.materials.len() as u64,
                     },
                 },
             ],
@@ -306,8 +333,47 @@ impl State {
             render_pass.draw(0..3, 0..1);
         }
 
+        self.globals.num_frames += 1;
         self.queue.submit(&[encoder.finish()]);
     }
+}
+
+fn make_sphereflake() -> Vec<geometry::Sphere> {
+    let r = sphereflake(Vec3::unit_y(), Vec3::unit_y(), 1.0, 0);
+    r
+}
+
+fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
+    let mut s = Vec::new();
+    s.push(geometry::Sphere::new(pos, r, 1));
+
+    if depth == 3 {
+        return s;
+    }
+
+    let perp: Vec3;
+    if axis.x() != 0.0 {
+        perp = Vec3::new(-axis.y(), axis.x(), 0.0).normalize();
+    } else if axis.y() != 0.0 {
+        perp = Vec3::new(axis.y(), -axis.x(), 0.0).normalize();
+    } else {
+        perp = Vec3::new(axis.z(), 0.0, -axis.x()).normalize();
+    };
+
+    for i in 1..3 {
+        let mat = glam::Mat3::from_axis_angle(perp, 0.785398 * i as f32);
+        let a1 = mat * axis.normalize();
+        let angle = 2.0 * 3.1415926 / (i * 3) as f32;
+        for j in 0..i * 3 {
+            let mat =
+                glam::Mat3::from_axis_angle(axis, angle * j as f32 + (i as f32 - 1.0) * 0.523599);
+            let new_axis = (mat * a1).normalize();
+            let new_pos = pos + new_axis * r * 1.33;
+            s.extend(sphereflake(new_pos, new_axis, 0.33 * r, depth + 1));
+        }
+    }
+
+    s
 }
 
 #[repr(C)]
