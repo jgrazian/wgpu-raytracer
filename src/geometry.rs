@@ -1,4 +1,10 @@
+use crate::aabb::{Bounded, AABB};
 use glam::Vec3;
+
+pub trait Buffer {
+    fn to_buffer(&self) -> Vec<u8>;
+    fn buffer_size(&self) -> usize;
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -6,7 +12,6 @@ pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
     pub mat_ptr: u32,
-    pub pad: [u32; 3],
 }
 unsafe impl bytemuck::Pod for Sphere {}
 unsafe impl bytemuck::Zeroable for Sphere {}
@@ -17,28 +22,34 @@ impl Sphere {
             center,
             radius,
             mat_ptr,
-            pad: [0; 3],
         }
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Debug, Default)]
-pub struct SphereBuffer {
-    pub spheres: Vec<Sphere>,
+impl Bounded for Sphere {
+    fn get_bounds(&self) -> AABB {
+        AABB::from_bounds(
+            self.center - Vec3::splat(self.radius),
+            self.center + Vec3::splat(self.radius),
+        )
+    }
 }
 
-impl SphereBuffer {
-    pub fn to_buffer(&self) -> Vec<u8> {
-        let mut res: Vec<u8> = vec![];
-        res.append(&mut bytemuck::cast_slice(&[self.spheres.len() as u32]).to_vec());
-        res.append(&mut bytemuck::cast_slice(&[0.0 as f32; 3]).to_vec());
-        res.append(&mut bytemuck::cast_slice(self.spheres.as_slice()).to_vec());
+impl Buffer for Vec<Sphere> {
+    fn to_buffer(&self) -> Vec<u8> {
+        let mut flat: Vec<u8> = Vec::new();
 
-        res
+        flat.extend_from_slice(bytemuck::cast_slice(&[self.len() as u32])); // 0
+        flat.extend_from_slice(bytemuck::cast_slice(&[0 as u32; 3])); // 1, 2, 3
+        for i in 0..self.len() {
+            flat.extend_from_slice(bytemuck::cast_slice(&[self[i]])); // 0, 1, 2, 3, 4
+            flat.extend_from_slice(bytemuck::cast_slice(&[0 as u32; 3])); // 5, 6, 7
+        }
+
+        flat
     }
 
-    pub fn len(&self) -> usize {
-        std::mem::size_of::<Sphere>() * self.spheres.len() + 16
+    fn buffer_size(&self) -> usize {
+        (std::mem::size_of::<Sphere>() + 12) * self.len() + 16
     }
 }

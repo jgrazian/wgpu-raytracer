@@ -1,8 +1,11 @@
 use glam::{Vec2, Vec3};
 use rand;
+use wgpu::util::DeviceExt;
 use winit::{event::WindowEvent, window::Window};
 
+use crate::bvh::BVH;
 use crate::geometry;
+use crate::geometry::Buffer;
 use crate::globals;
 use crate::material;
 use crate::pipelines::*;
@@ -22,13 +25,15 @@ pub struct State {
     swap_chain: wgpu::SwapChain,
 
     globals: globals::Globals,
-    spheres: geometry::SphereBuffer,
+    spheres: Vec<geometry::Sphere>,
     materials: material::MaterialBuffer,
+    bvh: BVH<geometry::Sphere>,
 
     globals_buffer: wgpu::Buffer,
     output_texture: wgpu::TextureView,
     spheres_buffer: wgpu::Buffer,
     material_buffer: wgpu::Buffer,
+    bvh_buffer: wgpu::Buffer,
 
     compute_pipeline: compute::ComputePipeline,
     render_pipeline: render::RenderPipeline,
@@ -43,30 +48,33 @@ impl State {
         let size = window.inner_size();
 
         // ---- Hardware ----
+        // Create Instance
+        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
         // Create Surface
-        let surface = wgpu::Surface::create(window);
+        let surface = unsafe { instance.create_surface(window) };
 
         // Pick a gpu
-        let adapter = wgpu::Adapter::request(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::Default,
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
-            },
-            wgpu::BackendBit::PRIMARY,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         println!("{}", adapter.get_info().name);
 
         // Request access to that GPU
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                extensions: wgpu::Extensions {
-                    anisotropic_filtering: false,
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::default(),
+                    limits: wgpu::Limits::default(),
+                    shader_validation: false,
                 },
-                limits: Default::default(),
-            })
-            .await;
+                None,
+            )
+            .await
+            .unwrap();
 
         // Create swap chain
         let sc_desc = wgpu::SwapChainDescriptor {
@@ -93,10 +101,11 @@ impl State {
             rng_seed: rand::random(),
             num_frames: 0,
         };
-        let globals_buffer = device.create_buffer_with_data(
-            bytemuck::cast_slice(&[globals]),
-            wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-        );
+        let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&[globals]),
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        });
 
         let output_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Output texture"),
@@ -105,34 +114,45 @@ impl State {
                 height: size.height,
                 depth: 1,
             },
-            array_layer_count: 1,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsage::STORAGE,
         });
-        let output_texture = output_texture.create_default_view();
+        let output_texture = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut spheres = geometry::SphereBuffer {
-            spheres: vec![geometry::Sphere::new(Vec3::new(0.0, -100.0, 0.0), 100.0, 0)],
-        };
-        spheres.spheres.extend(make_sphereflake());
-        let spheres_buffer = device.create_buffer_with_data(
-            spheres.to_buffer().as_slice(),
-            wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-        );
+        let mut spheres = vec![geometry::Sphere::new(Vec3::new(0.0, -100.0, 0.0), 100.0, 0)];
+
+        spheres.append(&mut make_sphereflake());
+
+        let spheres_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: spheres.to_buffer().as_slice(),
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+        });
+
+        println!("{:?}", spheres.len());
+        let bvh = BVH::from_objects(&spheres);
+        let bvh_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bvh.to_buffer().as_slice(),
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+        });
 
         let materials = material::MaterialBuffer {
             materials: vec![
                 material::Material::new([1.0, 0.7, 0.0], 0),
                 material::Material::new([0.1, 0.1, 0.1], 1),
+                material::Material::new([1.0, 1.0, 1.0], 2),
+                material::Material::new([4.0, 4.0, 4.0], 0),
             ],
         };
-        let material_buffer = device.create_buffer_with_data(
-            materials.to_buffer().as_slice(),
-            wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-        );
+        let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: materials.to_buffer().as_slice(),
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        });
 
         // Misc
         let mouse_state = MouseState {
@@ -150,10 +170,12 @@ impl State {
             globals,
             spheres,
             materials,
+            bvh,
             globals_buffer,
             output_texture,
             spheres_buffer,
             material_buffer,
+            bvh_buffer,
             compute_pipeline,
             render_pipeline,
             size,
@@ -187,14 +209,13 @@ impl State {
                 height: new_size.height,
                 depth: 1,
             },
-            array_layer_count: 1,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsage::STORAGE,
         });
-        self.output_texture = output_texture.create_default_view();
+        self.output_texture = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         self.render();
     }
@@ -211,7 +232,7 @@ impl State {
                 self.mouse_state.position = Vec2::new(position.x as f32, position.y as f32);
             }
             WindowEvent::MouseWheel { delta, .. } => match delta {
-                winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                winit::event::MouseScrollDelta::LineDelta(_, y) => {
                     self.dirty = true;
                     self.globals.arcball_zoom(*y);
                 }
@@ -234,7 +255,7 @@ impl State {
     pub fn render(&mut self) {
         let frame = self
             .swap_chain
-            .get_next_texture()
+            .get_current_frame()
             .expect("Timeout when acquiring next swap chain texture");
 
         let mut encoder = self
@@ -246,10 +267,13 @@ impl State {
         //Copy new data to GPU
         {
             let globals_size = std::mem::size_of::<globals::Globals>();
-            let globals_buffer = self.device.create_buffer_with_data(
-                bytemuck::cast_slice(&[self.globals]),
-                wgpu::BufferUsage::COPY_SRC,
-            );
+            let globals_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: bytemuck::cast_slice(&[self.globals]),
+                        usage: wgpu::BufferUsage::COPY_SRC,
+                    });
 
             encoder.copy_buffer_to_buffer(
                 &globals_buffer,
@@ -264,31 +288,26 @@ impl State {
         let compute_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Compute bind group"),
             layout: &self.compute_pipeline.bind_group_layout,
-            bindings: &[
-                wgpu::Binding {
+            entries: &[
+                wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &self.globals_buffer,
-                        range: 0..std::mem::size_of::<globals::Globals>() as u64,
-                    },
+                    resource: wgpu::BindingResource::Buffer(self.globals_buffer.slice(..)),
                 },
-                wgpu::Binding {
+                wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&self.output_texture),
                 },
-                wgpu::Binding {
+                wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &self.spheres_buffer,
-                        range: 0..self.spheres.len() as u64,
-                    },
+                    resource: wgpu::BindingResource::Buffer(self.spheres_buffer.slice(..)),
                 },
-                wgpu::Binding {
+                wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &self.material_buffer,
-                        range: 0..self.materials.len() as u64,
-                    },
+                    resource: wgpu::BindingResource::Buffer(self.material_buffer.slice(..)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(self.bvh_buffer.slice(..)),
                 },
             ],
         });
@@ -296,7 +315,7 @@ impl State {
         let render_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Render bind group"),
             layout: &self.render_pipeline.bind_group_layout,
-            bindings: &[wgpu::Binding {
+            entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(&self.output_texture),
             }],
@@ -314,15 +333,11 @@ impl State {
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: &frame.view,
+                    attachment: &frame.output.view,
                     resolve_target: None,
-                    load_op: wgpu::LoadOp::Clear,
-                    store_op: wgpu::StoreOp::Store,
-                    clear_color: wgpu::Color {
-                        r: 0.0,
-                        g: 1.0,
-                        b: 0.0,
-                        a: 1.0,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                        store: true,
                     },
                 }],
                 depth_stencil_attachment: None,
@@ -334,7 +349,7 @@ impl State {
         }
 
         self.globals.num_frames += 1;
-        self.queue.submit(&[encoder.finish()]);
+        self.queue.submit(Some(encoder.finish()));
     }
 }
 
@@ -344,10 +359,15 @@ fn make_sphereflake() -> Vec<geometry::Sphere> {
 }
 
 fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
-    let mut s = Vec::new();
-    s.push(geometry::Sphere::new(pos, r, 1));
+    const max_depth: u32 = 4;
 
-    if depth == 3 {
+    let mat = match depth % 2 {
+        0 => 1,
+        _ => 2,
+    };
+    let mut s = vec![geometry::Sphere::new(pos, r, mat)];
+
+    if depth == max_depth {
         return s;
     }
 
@@ -360,13 +380,22 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
         perp = Vec3::new(axis.z(), 0.0, -axis.x()).normalize();
     };
 
+    // Vertical
     for i in 1..3 {
         let mat = glam::Mat3::from_axis_angle(perp, 0.785398 * i as f32);
         let a1 = mat * axis.normalize();
-        let angle = 2.0 * 3.1415926 / (i * 3) as f32;
-        for j in 0..i * 3 {
-            let mat =
-                glam::Mat3::from_axis_angle(axis, angle * j as f32 + (i as f32 - 1.0) * 0.523599);
+        let n_spheres = match i % 2 {
+            1 => 3,
+            _ => 6,
+        };
+        let angle = 2.0 * 3.1415926 / (n_spheres) as f32;
+        // Around
+        for j in 0..n_spheres {
+            let offset = match i % 2 {
+                1 => 0.0,
+                _ => 0.523599,
+            };
+            let mat = glam::Mat3::from_axis_angle(axis, angle * j as f32 + offset);
             let new_axis = (mat * a1).normalize();
             let new_pos = pos + new_axis * r * 1.33;
             s.extend(sphereflake(new_pos, new_axis, 0.33 * r, depth + 1));

@@ -5,36 +5,58 @@ pub struct RenderPipeline {
 
 impl RenderPipeline {
     pub fn new(device: &wgpu::Device) -> Self {
+        let mut compiler = shaderc::Compiler::new().unwrap();
         // Load vertex shader
-        let vs = include_bytes!("shader.vert.spv");
-        let vs_module = device
-            .create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(vs.iter())).unwrap());
+        let vs_src = include_str!("shader.vert");
+        let vs_spirv = compiler
+            .compile_into_spirv(
+                vs_src,
+                shaderc::ShaderKind::Vertex,
+                "shader.vert",
+                "main",
+                None,
+            )
+            .unwrap();
+        let vs_module =
+            device.create_shader_module(wgpu::util::make_spirv(&vs_spirv.as_binary_u8()));
 
         // Load fragment shader
-        let fs = include_bytes!("shader.frag.spv");
-        let fs_module = device
-            .create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(fs.iter())).unwrap());
+        let fs_src = include_str!("shader.frag");
+        let fs_spirv = compiler
+            .compile_into_spirv(
+                fs_src,
+                shaderc::ShaderKind::Fragment,
+                "shader.frag",
+                "main",
+                None,
+            )
+            .unwrap();
+        let fs_module =
+            device.create_shader_module(wgpu::util::make_spirv(&fs_spirv.as_binary_u8()));
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Render"),
-            bindings: &[wgpu::BindGroupLayoutEntry {
+            entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStage::FRAGMENT,
                 ty: wgpu::BindingType::StorageTexture {
                     format: wgpu::TextureFormat::Rgba32Float,
                     dimension: wgpu::TextureViewDimension::D2,
-                    component_type: wgpu::TextureComponentType::Float,
                     readonly: false,
                 },
+                count: None,
             }],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
             bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: &pipeline_layout,
+            label: None,
+            layout: Some(&pipeline_layout),
             vertex_stage: wgpu::ProgrammableStageDescriptor {
                 module: &vs_module,
                 entry_point: "main",
@@ -49,6 +71,7 @@ impl RenderPipeline {
                 depth_bias: 0,
                 depth_bias_slope_scale: 0.0,
                 depth_bias_clamp: 0.0,
+                clamp_depth: false,
             }),
             primitive_topology: wgpu::PrimitiveTopology::TriangleList,
             color_states: &[wgpu::ColorStateDescriptor {

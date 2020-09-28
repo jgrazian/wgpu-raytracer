@@ -3,8 +3,9 @@
 #define FLT_MAX 3.402823466e+38
 #define FLT_MIN 1.175494351e-38
 #define M_TWO_PI 6.28318530718
-#define MAX_SPHERES 1024
+#define MAX_SPHERES 2048
 #define MAX_MATERIALS 32
+#define MAX_NODES 2048
 // ---- Structs ----
 struct HitRec {
     vec3 point;
@@ -30,6 +31,13 @@ struct Material {
     uint type;
 };
 
+struct Node {
+    vec3 min;
+    uint type;
+    vec3 max;
+    uint ptr;
+};
+
 // ---- Bind Buffers ----
 layout(local_size_x = 32, local_size_y = 32) in;
 
@@ -53,6 +61,11 @@ layout(set = 0, binding = 3, std140) uniform Materials {
     uint len;
     Material data[MAX_MATERIALS];
 } materials;
+
+layout(set = 0, binding = 4, std140) buffer BVH {
+    uint len;
+    Node data[MAX_NODES];
+} bvh;
 
 // RNG
 float rand(inout float seed, vec2 pixel) {
@@ -98,6 +111,12 @@ vec3 ray_at(Ray r, float t) {
     return (r.origin + t*r.direction);
 }
 
+float schlick(float cosine, float ref_idx) {
+    float r0 = (1-ref_idx) / (1+ref_idx);
+    r0 = r0*r0;
+    return r0 + (1-r0)*pow((1 - cosine), 5);
+}
+
 // ---- Impl Sphere ----
 bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
     vec3 oc = r.origin - s.center;
@@ -131,19 +150,51 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
     return false;
 }
 
+// ---- Impl AABB ----
+bool hit_box(Node b, Ray r) {
+    vec3 inv_dir = 1 / r.direction;
+
+    vec3 tbot = inv_dir * (b.min - r.origin);
+    vec3 ttop = inv_dir * (b.max - r.origin);
+    vec3 tmin = min(ttop, tbot);
+    vec3 tmax = max(ttop, tbot);
+    vec2 t = max(tmin.xx, tmin.yz);
+    float t0 = max(t.x, t.y);
+    t = min(tmax.xx, tmax.yz);
+    float t1 = min(t.x, t.y);
+
+    return t1 > max(t0, 0.0);
+}
+
 // ---- Main Body ----
 bool hit_world(Ray r, float t_min, float t_max, inout HitRec rec) {
     HitRec temp_rec;
     bool hit_anything = false;
     float closest_so_far = t_max;
 
-    for(uint i = 0; i < spheres.len; ++i) {
-        if (hit_sphere(spheres.data[i], r, t_min, closest_so_far, temp_rec)) {
-            hit_anything = true;
-            closest_so_far = temp_rec.t;
-            rec = temp_rec;
+    uint cur_index = 0;
+    Node cur_node;
+
+    while (cur_index < bvh.len) {
+        cur_node = bvh.data[cur_index];
+        if (hit_box(cur_node, r)) {
+            cur_index = cur_index + 1;
+            if (cur_node.type == 1) {
+                if (hit_sphere(spheres.data[cur_node.ptr], r, t_min, closest_so_far, temp_rec)) {
+                    hit_anything = true;
+                    closest_so_far = temp_rec.t;
+                    rec = temp_rec;
+                } 
+            }
+        } else {
+            if (cur_node.type == 0) {
+                cur_index = cur_node.ptr;
+            } else {
+                cur_index = cur_index + 1;
+            }  
         }
     }
+
     return hit_anything;
 }
 
@@ -158,8 +209,26 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
 
     while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec)) {
         vec3 target;
-        if (materials.data[rec.mat_ptr].type == 1) { //metal
-            target = rec.point + reflect(r.direction, rec.normal);
+        uint mat_type = materials.data[rec.mat_ptr].type;
+        vec3 unit_direction = normalize(r.direction);
+        if (mat_type == 1) { //metal
+            target = rec.point + reflect(unit_direction, rec.normal);
+        } else if (mat_type == 2) { // dielectric
+            float ref_idx = 1.75;
+            float eta = rec.front_face ? (1.0 / ref_idx) : ref_idx;
+
+            float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
+            float sin_theta = sqrt(1.0 - cos_theta*cos_theta);
+
+            if (eta * sin_theta > 1.0 ) { // Too shallow angle -> reflect
+                target = rec.point + reflect(unit_direction, rec.normal);
+            } else { // Refract
+                float reflect_prob = schlick(cos_theta, eta);
+                if (rand(seed, pixel) > reflect_prob) { // Reflect?
+                    target = rec.point + reflect(unit_direction, rec.normal);
+                } 
+                target = rec.point + refract(unit_direction, rec.normal, eta);
+            }
         } else { // Diffuse
             target = rec.point + random_in_hemisphere(rec.normal, rand2(seed, pixel));
         }

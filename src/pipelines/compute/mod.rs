@@ -6,19 +6,33 @@ pub struct ComputePipeline {
 impl ComputePipeline {
     pub fn new(device: &wgpu::Device) -> Self {
         // Load shader
-        let cs = include_bytes!("shader.comp.spv");
-        let cs_module = device
-            .create_shader_module(&wgpu::read_spirv(std::io::Cursor::new(cs.iter())).unwrap());
+        let cs_src = include_str!("shader.comp");
+        let mut compiler = shaderc::Compiler::new().unwrap();
+        let cs_spirv = compiler
+            .compile_into_spirv(
+                cs_src,
+                shaderc::ShaderKind::Compute,
+                "shader.comp",
+                "main",
+                None,
+            )
+            .unwrap();
+        let cs_module =
+            device.create_shader_module(wgpu::util::make_spirv(&cs_spirv.as_binary_u8()));
 
         // Bind Groups
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Compute"),
-            bindings: &[
+            entries: &[
                 // Globals
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStage::COMPUTE,
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
                 // Output image
                 wgpu::BindGroupLayoutEntry {
@@ -26,10 +40,10 @@ impl ComputePipeline {
                     visibility: wgpu::ShaderStage::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         dimension: wgpu::TextureViewDimension::D2,
-                        component_type: wgpu::TextureComponentType::Float,
                         format: wgpu::TextureFormat::Rgba32Float,
                         readonly: false,
                     },
+                    count: None,
                 },
                 // Spheres
                 wgpu::BindGroupLayoutEntry {
@@ -38,23 +52,43 @@ impl ComputePipeline {
                     ty: wgpu::BindingType::StorageBuffer {
                         dynamic: false,
                         readonly: false,
+                        min_binding_size: None,
                     },
+                    count: None,
                 },
                 // Materials
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStage::COMPUTE,
-                    ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // BVH
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStage::COMPUTE,
+                    ty: wgpu::BindingType::StorageBuffer {
+                        dynamic: false,
+                        readonly: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
             ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
             bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
         });
 
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            layout: &pipeline_layout,
+            label: None,
+            layout: Some(&pipeline_layout),
             compute_stage: wgpu::ProgrammableStageDescriptor {
                 module: &cs_module,
                 entry_point: "main",

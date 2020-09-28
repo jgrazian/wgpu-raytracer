@@ -1,4 +1,6 @@
+mod aabb;
 mod app;
+mod bvh;
 mod geometry;
 mod globals;
 mod material;
