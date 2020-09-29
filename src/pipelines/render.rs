@@ -5,34 +5,13 @@ pub struct RenderPipeline {
 
 impl RenderPipeline {
     pub fn new(device: &wgpu::Device) -> Self {
-        let mut compiler = shaderc::Compiler::new().unwrap();
         // Load vertex shader
-        let vs_src = include_str!("shader.vert");
-        let vs_spirv = compiler
-            .compile_into_spirv(
-                vs_src,
-                shaderc::ShaderKind::Vertex,
-                "shader.vert",
-                "main",
-                None,
-            )
-            .unwrap();
         let vs_module =
-            device.create_shader_module(wgpu::util::make_spirv(&vs_spirv.as_binary_u8()));
+            device.create_shader_module(wgpu::include_spirv!["../glsl/shader.vert.spv"]);
 
         // Load fragment shader
-        let fs_src = include_str!("shader.frag");
-        let fs_spirv = compiler
-            .compile_into_spirv(
-                fs_src,
-                shaderc::ShaderKind::Fragment,
-                "shader.frag",
-                "main",
-                None,
-            )
-            .unwrap();
         let fs_module =
-            device.create_shader_module(wgpu::util::make_spirv(&fs_spirv.as_binary_u8()));
+            device.create_shader_module(wgpu::include_spirv!["../glsl/shader.frag.spv"]);
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Render"),

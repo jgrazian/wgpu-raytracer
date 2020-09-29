@@ -12,4 +12,6 @@ futures = "0.3.5"
 bytemuck = "1.2"
 glam = "0.9.4"
 rand = "0.7"
+
+[build-dependencies]
 shaderc = "0.6"

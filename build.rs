@@ -1,40 +1,67 @@
-use std::env;
 use std::fs;
-use std::io::Read;
-use std::path::Path;
 
 fn main() {
-    // let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").unwrap();
+    let mut compiler = shaderc::Compiler::new().unwrap();
+    let mut options = shaderc::CompileOptions::new().unwrap();
+    options.set_optimization_level(shaderc::OptimizationLevel::Performance);
+    options.set_include_callback(include_glsl);
 
-    // let cs = include_str!("src/pipelines/compute/shader.comp");
-    // let mut cs_compiled = glsl_to_spirv::compile(cs, glsl_to_spirv::ShaderType::Compute).unwrap();
-    // let mut cs_bytes = Vec::new();
-    // cs_compiled.read_to_end(&mut cs_bytes).unwrap();
-    // fs::write(
-    //     &Path::new(&manifest_dir).join("src/pipelines/compute/shader.comp.spv"),
-    //     cs_bytes,
-    // )
-    // .unwrap();
+    // Compute
+    let cs_src = include_str!("src/glsl/compute/shader.comp");
+    let cs_spirv = compiler
+        .compile_into_spirv(
+            cs_src,
+            shaderc::ShaderKind::Compute,
+            "shader.comp",
+            "main",
+            Some(&options),
+        )
+        .unwrap();
+    fs::write("src/glsl/compute/shader.comp.spv", cs_spirv.as_binary_u8())
+        .expect("Unable to write file");
 
-    // let vs = include_str!("src/pipelines/render/shader.vert");
-    // let mut vs_compiled = glsl_to_spirv::compile(vs, glsl_to_spirv::ShaderType::Vertex).unwrap();
-    // let mut vs_bytes = Vec::new();
-    // vs_compiled.read_to_end(&mut vs_bytes).unwrap();
-    // fs::write(
-    //     &Path::new(&manifest_dir).join("src/pipelines/render/shader.vert.spv"),
-    //     vs_bytes,
-    // )
-    // .unwrap();
+    // Vertex
+    let vs_src = include_str!("src/glsl/shader.vert");
+    let vs_spirv = compiler
+        .compile_into_spirv(
+            vs_src,
+            shaderc::ShaderKind::Vertex,
+            "shader.vert",
+            "main",
+            Some(&options),
+        )
+        .unwrap();
+    fs::write("src/glsl/shader.vert.spv", vs_spirv.as_binary_u8()).expect("Unable to write file");
 
-    // let fs = include_str!("src/pipelines/render/shader.frag");
-    // let mut fs_compiled = glsl_to_spirv::compile(fs, glsl_to_spirv::ShaderType::Fragment).unwrap();
-    // let mut fs_bytes = Vec::new();
-    // fs_compiled.read_to_end(&mut fs_bytes).unwrap();
-    // fs::write(
-    //     &Path::new(&manifest_dir).join("src/pipelines/render/shader.frag.spv"),
-    //     fs_bytes,
-    // )
-    // .unwrap();
+    // Fragment
+    let fs_src = include_str!("src/glsl/shader.frag");
+    let fs_spirv = compiler
+        .compile_into_spirv(
+            fs_src,
+            shaderc::ShaderKind::Fragment,
+            "shader.frag",
+            "main",
+            Some(&options),
+        )
+        .unwrap();
+    fs::write("src/glsl/shader.frag.spv", fs_spirv.as_binary_u8()).expect("Unable to write file");
+}
 
-    println!("cargo:rerun-if-changed=build.rs");
+fn include_glsl(
+    name: &str,
+    _directive: shaderc::IncludeType,
+    _source: &str,
+    _depth: usize,
+) -> Result<shaderc::ResolvedInclude, String> {
+    let path = format!["src/glsl/compute/{}", name];
+
+    match fs::read_to_string(&path) {
+        Ok(file) => {
+            return Ok(shaderc::ResolvedInclude {
+                resolved_name: path,
+                content: file,
+            })
+        }
+        Err(e) => return Err(e.to_string()),
+    }
 }

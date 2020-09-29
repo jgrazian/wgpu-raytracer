@@ -6,19 +6,8 @@ pub struct ComputePipeline {
 impl ComputePipeline {
     pub fn new(device: &wgpu::Device) -> Self {
         // Load shader
-        let cs_src = include_str!("shader.comp");
-        let mut compiler = shaderc::Compiler::new().unwrap();
-        let cs_spirv = compiler
-            .compile_into_spirv(
-                cs_src,
-                shaderc::ShaderKind::Compute,
-                "shader.comp",
-                "main",
-                None,
-            )
-            .unwrap();
         let cs_module =
-            device.create_shader_module(wgpu::util::make_spirv(&cs_spirv.as_binary_u8()));
+            device.create_shader_module(wgpu::include_spirv!["../glsl/compute/shader.comp.spv"]);
 
         // Bind Groups
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
