@@ -15,16 +15,28 @@ impl RenderPipeline {
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Render"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStage::FRAGMENT,
-                ty: wgpu::BindingType::StorageTexture {
-                    format: wgpu::TextureFormat::Rgba32Float,
-                    dimension: wgpu::TextureViewDimension::D2,
-                    readonly: false,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    ty: wgpu::BindingType::StorageTexture {
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        dimension: wgpu::TextureViewDimension::D2,
+                        readonly: false,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                // num_frames
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStage::FRAGMENT,
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

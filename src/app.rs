@@ -142,8 +142,8 @@ impl State {
 
         let materials = material::MaterialBuffer {
             materials: vec![
-                material::Material::new([1.0, 0.7, 0.0], 0),
-                material::Material::new([0.1, 0.1, 0.1], 1),
+                material::Material::new([1.0, 0.84, 0.64], 0),
+                material::Material::new([0.1, 0.1, 0.2], 0),
                 material::Material::new([1.0, 1.0, 1.0], 2),
                 material::Material::new([4.0, 4.0, 4.0], 0),
             ],
@@ -312,13 +312,27 @@ impl State {
             ],
         });
 
+        let num_frame_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&[self.globals.num_frames]),
+                usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            });
+
         let render_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Render bind group"),
             layout: &self.render_pipeline.bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&self.output_texture),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.output_texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(num_frame_buffer.slice(..)),
+                },
+            ],
         });
 
         // Compute pass
@@ -359,7 +373,7 @@ fn make_sphereflake() -> Vec<geometry::Sphere> {
 }
 
 fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
-    const max_depth: u32 = 4;
+    const max_depth: u32 = 5;
 
     let mat = match depth % 2 {
         0 => 1,
@@ -397,7 +411,7 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
             };
             let mat = glam::Mat3::from_axis_angle(axis, angle * j as f32 + offset);
             let new_axis = (mat * a1).normalize();
-            let new_pos = pos + new_axis * r * 1.33;
+            let new_pos = pos + new_axis * (r + r * 0.05) * 1.33;
             s.extend(sphereflake(new_pos, new_axis, 0.33 * r, depth + 1));
         }
     }

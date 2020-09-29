@@ -13,7 +13,7 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
 
     HitRec rec;
 
-    vec3 res = vec3(0.0);
+    vec3 res = vec3(1.0);
     float attenuation = 1.0;
 
     while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec)) {
@@ -23,7 +23,7 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
         if (mat_type == 1) { //metal
             target = rec.point + reflect(unit_direction, rec.normal);
         } else if (mat_type == 2) { // dielectric
-            float ref_idx = 1.75;
+            float ref_idx = 1.5;
             float eta = rec.front_face ? (1.0 / ref_idx) : ref_idx;
 
             float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
@@ -44,19 +44,18 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
         
         r.origin = rec.point;
         r.direction = target - rec.point;
-
-        attenuation *= 0.5;
-        res += attenuation * materials.data[rec.mat_ptr].albedo;
         
         depth++;
+
+        //attenuation *= 0.5;
+        res *= materials.data[rec.mat_ptr].albedo;
     }
 
     bool hit_sky = depth < max_depth; //1 if we hit sky, 0 if max_depth is reached
     float t = 0.5*(normalize(r.direction).y + 1.0);
-    res += attenuation * (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
+    res *= (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
 
-    float scale = 1.0 / float(depth + int(depth == 0));
-    return res * scale;
+    return res;
 }
 
 void main() {
@@ -94,8 +93,9 @@ void main() {
         imageStore(output_image, pixel_coordinates, vec4(pixel_color, 1.0));
     } else {
         vec4 current_color = imageLoad(output_image, pixel_coordinates);
-        vec4 new_color = vec4(current_color.xyz + (pixel_color.xyz - current_color.xyz) / float(globals.num_frames), 1.0);
-        imageStore(output_image, pixel_coordinates, new_color);
+        vec3 new_color = current_color.xyz + pixel_color.xyz;
+        //vec4 new_color = vec4(current_color.xyz + (pixel_color.xyz - current_color.xyz) / float(globals.num_frames), 1.0);
+        imageStore(output_image, pixel_coordinates, vec4(new_color, 1.0));
     }
 
 }
