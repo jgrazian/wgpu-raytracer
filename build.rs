@@ -7,7 +7,7 @@ fn main() {
     options.set_include_callback(include_glsl);
 
     // Compute
-    let cs_src = include_str!("src/glsl/compute/shader.comp");
+    let cs_src = include_str!("src/glsl/shader.comp");
     let cs_spirv = compiler
         .compile_into_spirv(
             cs_src,
@@ -17,8 +17,9 @@ fn main() {
             Some(&options),
         )
         .unwrap();
-    fs::write("src/glsl/compute/shader.comp.spv", cs_spirv.as_binary_u8())
-        .expect("Unable to write file");
+    fs::write("src/glsl/shader.comp.spv", cs_spirv.as_binary_u8()).expect("Unable to write file");
+
+    println!("cargo:rerun-if-changed=src/glsl/shader.comp");
 
     // Vertex
     let vs_src = include_str!("src/glsl/shader.vert");
@@ -53,7 +54,7 @@ fn include_glsl(
     _source: &str,
     _depth: usize,
 ) -> Result<shaderc::ResolvedInclude, String> {
-    let path = format!["src/glsl/compute/{}", name];
+    let path = format!["src/glsl/include/{}", name];
 
     match fs::read_to_string(&path) {
         Ok(file) => {

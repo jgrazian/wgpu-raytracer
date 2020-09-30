@@ -6,6 +6,8 @@
 #define MAX_MATERIALS 2048
 #define MAX_NODES 2048
 
+const uint k = 1103515245U;
+
 float rand(inout float seed, vec2 pixel) {
     float result = fract(sin(seed / 100.0f * dot(pixel, vec2(12.9898f, 78.233f))) * 43758.5453f);
     seed += 1.0f;
@@ -19,6 +21,22 @@ vec2 rand2(inout float seed, vec2 pixel) {
 vec3 rand3(inout float seed, vec2 pixel) {
     vec3 p = 2.0 * vec3(rand(seed, pixel), rand(seed, pixel), rand(seed, pixel)) - vec3(1.0);
     return normalize(p);
+}
+
+vec3 hash3(uvec3 x) {
+    x = ((x>>8U)^x.yzx)*k;
+    x = ((x>>8U)^x.yzx)*k;
+    x = ((x>>8U)^x.yzx)*k;
+    
+    return vec3(x)*(1.0/float(0xffffffffU));
+}
+
+vec2 hash2(uvec3 x) {
+    return hash3(x).xy;
+}
+
+float hash(uvec3 x) {
+    return hash3(x).x;
 }
 
 vec3 sample_sphere_uniform(vec2 s) {

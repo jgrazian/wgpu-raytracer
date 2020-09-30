@@ -1,29 +1,36 @@
 #version 450
 precision highp float;
 
-#include "utils.glsl"
+#include "common.glsl"
+#include "ray.glsl"
 #include "types.glsl"
 #include "buffers.glsl"
 #include "intersection.glsl"
 
-
+// -------------
+// Ray Color
+// -------------
 vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
     int depth = 0;
     int max_depth = 10;
 
     HitRec rec;
+    bool hitLight = false;
 
-    vec3 res = vec3(1.0);
-    float attenuation = 1.0;
+    vec3 res = vec3(0.0);
+    vec3 throughput = vec3(1.0);
 
-    while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec)) {
+    while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec) && !hitLight) {
         vec3 target;
         uint mat_type = materials.data[rec.mat_ptr].type;
         vec3 unit_direction = normalize(r.direction);
-        if (mat_type == 1) { //metal
+
+        //metal
+        if (mat_type == 1) {
             target = rec.point + reflect(unit_direction, rec.normal);
-        } else if (mat_type == 2) { // dielectric
-            float ref_idx = 1.5;
+        // dielectric
+        } else if (mat_type == 2) {
+            float ref_idx = 1.75;
             float eta = rec.front_face ? (1.0 / ref_idx) : ref_idx;
 
             float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
@@ -38,7 +45,8 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
                 } 
                 target = rec.point + refract(unit_direction, rec.normal, eta);
             }
-        } else { // Diffuse
+        // Diffuse
+        } else {
             target = rec.point + random_in_hemisphere(rec.normal, rand2(seed, pixel));
         }
         
@@ -47,15 +55,21 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
         
         depth++;
 
-        //attenuation *= 0.5;
-        res *= materials.data[rec.mat_ptr].albedo;
+        hitLight = materials.data[rec.mat_ptr].is_light;
+        throughput *= materials.data[rec.mat_ptr].albedo;
     }
 
-    bool hit_sky = depth < max_depth; //1 if we hit sky, 0 if max_depth is reached
-    float t = 0.5*(normalize(r.direction).y + 1.0);
-    res *= (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
+    if (hitLight) {
+        res = materials.data[rec.mat_ptr].albedo * throughput;
+    } else {
+        res = vec3(0.0);
+    }
 
-    return res;
+    //bool hit_sky = depth < max_depth; //1 if we hit sky, 0 if max_depth is reached
+    //float t = 0.5*(normalize(r.direction).y + 1.0);
+    //res *= (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
+
+    return res / float(depth);
 }
 
 void main() {

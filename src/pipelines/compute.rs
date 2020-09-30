@@ -7,7 +7,7 @@ impl ComputePipeline {
     pub fn new(device: &wgpu::Device) -> Self {
         // Load shader
         let cs_module =
-            device.create_shader_module(wgpu::include_spirv!["../glsl/compute/shader.comp.spv"]);
+            device.create_shader_module(wgpu::include_spirv!["../glsl/shader.comp.spv"]);
 
         // Bind Groups
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

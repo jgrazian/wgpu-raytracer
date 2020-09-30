@@ -26,7 +26,7 @@ pub struct State {
 
     globals: globals::Globals,
     spheres: Vec<geometry::Sphere>,
-    materials: material::MaterialBuffer,
+    materials: Vec<material::Material>,
     bvh: BVH<geometry::Sphere>,
 
     globals_buffer: wgpu::Buffer,
@@ -94,7 +94,7 @@ impl State {
         let viewport_height = 2.0;
         let ar = size.width as f32 / size.height as f32;
         let globals = globals::Globals {
-            camera_pos: Vec3::new(0.0, 0.0, 1.25),
+            camera_pos: Vec3::new(0.0, 4.0, 4.0),
             viewport: Vec2::new(ar * viewport_height, viewport_height),
             window_size: Vec2::new(size.width as f32, size.height as f32),
             aspect_ratio: ar,
@@ -122,8 +122,15 @@ impl State {
         });
         let output_texture = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut spheres = vec![geometry::Sphere::new(Vec3::new(0.0, -100.0, 0.0), 100.0, 0)];
-
+        let mut spheres = vec![
+            geometry::Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 0),
+            geometry::Sphere::new(Vec3::new(0.0, 1010.0, 0.0), 1000.0, 0),
+            geometry::Sphere::new(Vec3::new(1005.0, 0.0, 0.0), 1000.0, 6),
+            geometry::Sphere::new(Vec3::new(-1005.0, 0.0, 0.0), 1000.0, 7),
+            geometry::Sphere::new(Vec3::new(0.0, 0.0, -1005.0), 1000.0, 4),
+            geometry::Sphere::new(Vec3::new(0.0, 0.0, 1005.0), 1000.0, 4),
+            geometry::Sphere::new(Vec3::new(3.0, 4.0, -3.0), 0.5, 3),
+        ];
         spheres.append(&mut make_sphereflake());
 
         let spheres_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -140,14 +147,16 @@ impl State {
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
-        let materials = material::MaterialBuffer {
-            materials: vec![
-                material::Material::new([1.0, 0.84, 0.64], 0),
-                material::Material::new([0.1, 0.1, 0.2], 0),
-                material::Material::new([1.0, 1.0, 1.0], 2),
-                material::Material::new([4.0, 4.0, 4.0], 0),
-            ],
-        };
+        let materials = vec![
+            material::Material::new([1.0, 1.0, 1.0], 0, false),
+            material::Material::new([0.5, 0.5, 0.5], 1, false),
+            material::Material::new([1.0, 1.0, 1.0], 2, false),
+            material::Material::new([4.0, 4.0, 4.0], 0, true),
+            material::Material::new([0.9, 0.9, 0.9], 0, false),
+            material::Material::new([0.2, 0.1, 0.9], 0, false),
+            material::Material::new([1.0, 0.0, 0.0], 0, false),
+            material::Material::new([0.0, 1.0, 0.0], 0, false),
+        ];
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: materials.to_buffer().as_slice(),
@@ -373,13 +382,13 @@ fn make_sphereflake() -> Vec<geometry::Sphere> {
 }
 
 fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
-    const max_depth: u32 = 5;
+    const max_depth: u32 = 0;
 
     let mat = match depth % 2 {
         0 => 1,
         _ => 2,
     };
-    let mut s = vec![geometry::Sphere::new(pos, r, mat)];
+    let mut s = vec![geometry::Sphere::new(pos, r, 2)];
 
     if depth == max_depth {
         return s;
@@ -411,7 +420,7 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
             };
             let mat = glam::Mat3::from_axis_angle(axis, angle * j as f32 + offset);
             let new_axis = (mat * a1).normalize();
-            let new_pos = pos + new_axis * (r + r * 0.05) * 1.33;
+            let new_pos = pos + new_axis * (r + 0.0001) * 1.33;
             s.extend(sphereflake(new_pos, new_axis, 0.33 * r, depth + 1));
         }
     }

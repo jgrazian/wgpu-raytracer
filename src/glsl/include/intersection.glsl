@@ -1,7 +1,3 @@
-vec3 ray_at(Ray r, float t) {
-    return (r.origin + t*r.direction);
-}
-
 void set_face_normal(inout HitRec rec, Ray r, vec3 outward_normal) {
     rec.front_face = dot(r.direction, outward_normal) < 0;
     rec.normal = rec.front_face ? outward_normal :-outward_normal;

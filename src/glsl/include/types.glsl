@@ -1,6 +1,7 @@
 struct Material {
     vec3 albedo;
     uint type;
+    bool is_light;
 };
 
 struct HitRec {
@@ -22,9 +23,4 @@ struct BVHNode {
     uint type;
     vec3 max;
     uint ptr;
-};
-
-struct Ray {
-    vec3 origin;
-    vec3 direction;
 };
