@@ -10,7 +10,7 @@ precision highp float;
 // -------------
 // Ray Color
 // -------------
-vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
+vec3 ray_color(Ray r, inout uvec3 seed) {
     int depth = 0;
     int max_depth = 10;
 
@@ -21,9 +21,11 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
     vec3 throughput = vec3(1.0);
 
     while (depth < max_depth && hit_world(r, 0.001, FLT_MAX, rec) && !hitLight) {
+        seed = seed + uvec3(0, 0, depth);
+
         vec3 target;
         uint mat_type = materials.data[rec.mat_ptr].type;
-        vec3 unit_direction = normalize(r.direction);
+        vec3 unit_direction = r.direction;
 
         //metal
         if (mat_type == 1) {
@@ -40,18 +42,20 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
                 target = rec.point + reflect(unit_direction, rec.normal);
             } else { // Refract
                 float reflect_prob = schlick(cos_theta, eta);
-                if (rand(seed, pixel) > reflect_prob) { // Reflect?
+                if (hash(seed) < reflect_prob) { // Reflect?
                     target = rec.point + reflect(unit_direction, rec.normal);
-                } 
-                target = rec.point + refract(unit_direction, rec.normal, eta);
+                } else {
+                    target = rec.point + refract(unit_direction, rec.normal, eta);
+                }
             }
         // Diffuse
         } else {
-            target = rec.point + random_in_hemisphere(rec.normal, rand2(seed, pixel));
+            target = rec.point + random_in_hemisphere(rec.normal, hash2(seed));
         }
         
         r.origin = rec.point;
-        r.direction = target - rec.point;
+        r.direction = normalize(target - rec.point);
+        r.inv_direction = 1 / r.direction;
         
         depth++;
 
@@ -65,10 +69,6 @@ vec3 ray_color(Ray r, inout float seed, vec2 pixel) {
         res = vec3(0.0);
     }
 
-    //bool hit_sky = depth < max_depth; //1 if we hit sky, 0 if max_depth is reached
-    //float t = 0.5*(normalize(r.direction).y + 1.0);
-    //res *= (float(hit_sky) * ((1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0)));
-
     return res / float(depth);
 }
 
@@ -77,9 +77,9 @@ void main() {
     const ivec2 pixel_coordinates = ivec2(gl_GlobalInvocationID.xy);
     const vec2 image_size = globals.window_size;
     const vec2 uv = vec2(pixel_coordinates) / image_size;
-    float seed = globals.seed;
+    uvec3 seed = uvec3(pixel_coordinates, globals.num_frames);
 
-    const vec2 sample_pos = (vec2(pixel_coordinates) + rand2(seed, uv)) / image_size;
+    const vec2 sample_pos = (vec2(pixel_coordinates) + hash2(seed)) / image_size;
 
     if (gl_GlobalInvocationID.x >= image_size.x || gl_GlobalInvocationID.y >= image_size.y) {
         return;
@@ -98,9 +98,9 @@ void main() {
     vec3 upper_left_corner = look_from - horizontal/2.0 + vertical/2.0 - w;
 
     // Main loop
-    vec3 ray_dir = upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - look_from;
-    Ray r = Ray(look_from, ray_dir);
-    vec3 pixel_color = ray_color(r, seed, uv);
+    vec3 ray_dir = normalize(upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - look_from);
+    Ray r = Ray(look_from, ray_dir, 1 / ray_dir);
+    vec3 pixel_color = ray_color(r, seed);
 
     // Output
     if (globals.num_frames == 0) {
@@ -108,7 +108,6 @@ void main() {
     } else {
         vec4 current_color = imageLoad(output_image, pixel_coordinates);
         vec3 new_color = current_color.xyz + pixel_color.xyz;
-        //vec4 new_color = vec4(current_color.xyz + (pixel_color.xyz - current_color.xyz) / float(globals.num_frames), 1.0);
         imageStore(output_image, pixel_coordinates, vec4(new_color, 1.0));
     }
 

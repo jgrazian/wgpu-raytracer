@@ -11,7 +11,7 @@ use futures::executor::block_on;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    window::WindowBuilder,
 };
 
 fn main() {

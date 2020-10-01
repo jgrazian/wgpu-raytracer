@@ -19,8 +19,6 @@ fn main() {
         .unwrap();
     fs::write("src/glsl/shader.comp.spv", cs_spirv.as_binary_u8()).expect("Unable to write file");
 
-    println!("cargo:rerun-if-changed=src/glsl/shader.comp");
-
     // Vertex
     let vs_src = include_str!("src/glsl/shader.vert");
     let vs_spirv = compiler
@@ -46,6 +44,15 @@ fn main() {
         )
         .unwrap();
     fs::write("src/glsl/shader.frag.spv", fs_spirv.as_binary_u8()).expect("Unable to write file");
+
+    println!("cargo:rerun-if-changed=src/glsl/shader.comp");
+    println!("cargo:rerun-if-changed=src/glsl/shader.vert");
+    println!("cargo:rerun-if-changed=src/glsl/shader.frag");
+    for entry in fs::read_dir("src/glsl/include").unwrap() {
+        let file = entry.unwrap();
+        let fname = file.file_name().into_string().unwrap();
+        println!("cargo:rerun-if-changed=src/glsl/{}", fname);
+    }
 }
 
 fn include_glsl(

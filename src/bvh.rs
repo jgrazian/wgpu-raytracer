@@ -68,7 +68,7 @@ impl<T: Bounded + std::fmt::Debug> BVH<T> {
             bounds = AABB::union(&bounds, &obj.get_bounds());
         }
 
-        let mut split_axis = bounds.largest_axis();
+        let split_axis = bounds.largest_axis();
         let (mut l_obj, mut l_ind, mut r_obj, mut r_ind) =
             Self::split_on_axis(&split_axis, &bounds, objects, index);
 
@@ -86,10 +86,6 @@ impl<T: Bounded + std::fmt::Debug> BVH<T> {
                 r_ind = l_ind[l_ind.len() / 2..].to_vec();
             }
             _ => (),
-        }
-
-        if l_obj.len() < 3 {
-            //println!("{:?}", l_obj);
         }
 
         let mut left_nodes = Self::make_bvh(&l_obj, &l_ind, ptr + 1);

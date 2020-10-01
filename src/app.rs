@@ -124,11 +124,11 @@ impl State {
 
         let mut spheres = vec![
             geometry::Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 0),
-            geometry::Sphere::new(Vec3::new(0.0, 1010.0, 0.0), 1000.0, 0),
-            geometry::Sphere::new(Vec3::new(1005.0, 0.0, 0.0), 1000.0, 6),
-            geometry::Sphere::new(Vec3::new(-1005.0, 0.0, 0.0), 1000.0, 7),
-            geometry::Sphere::new(Vec3::new(0.0, 0.0, -1005.0), 1000.0, 4),
-            geometry::Sphere::new(Vec3::new(0.0, 0.0, 1005.0), 1000.0, 4),
+            //geometry::Sphere::new(Vec3::new(0.0, 1010.0, 0.0), 1000.0, 0),
+            //geometry::Sphere::new(Vec3::new(1005.0, 0.0, 0.0), 1000.0, 6),
+            //geometry::Sphere::new(Vec3::new(-1005.0, 0.0, 0.0), 1000.0, 7),
+            //geometry::Sphere::new(Vec3::new(0.0, 0.0, -1005.0), 1000.0, 4),
+            //geometry::Sphere::new(Vec3::new(0.0, 0.0, 1005.0), 1000.0, 4),
             geometry::Sphere::new(Vec3::new(3.0, 4.0, -3.0), 0.5, 3),
         ];
         spheres.append(&mut make_sphereflake());
@@ -382,13 +382,13 @@ fn make_sphereflake() -> Vec<geometry::Sphere> {
 }
 
 fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
-    const max_depth: u32 = 0;
+    const max_depth: u32 = 2;
 
     let mat = match depth % 2 {
         0 => 1,
         _ => 2,
     };
-    let mut s = vec![geometry::Sphere::new(pos, r, 2)];
+    let mut s = vec![geometry::Sphere::new(pos, r, mat)];
 
     if depth == max_depth {
         return s;
@@ -420,7 +420,7 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
             };
             let mat = glam::Mat3::from_axis_angle(axis, angle * j as f32 + offset);
             let new_axis = (mat * a1).normalize();
-            let new_pos = pos + new_axis * (r + 0.0001) * 1.33;
+            let new_pos = pos + new_axis * (r) * 1.33;
             s.extend(sphereflake(new_pos, new_axis, 0.33 * r, depth + 1));
         }
     }
