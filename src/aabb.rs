@@ -1,13 +1,13 @@
 use glam::Vec3;
 
-pub trait Bounded {
+pub trait Bounded: std::fmt::Debug {
     fn get_bounds(&self) -> AABB;
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct AABB {
-    min: Vec3,
-    max: Vec3,
+    pub min: Vec3,
+    pub max: Vec3,
 }
 
 #[derive(Debug)]
@@ -29,15 +29,25 @@ impl AABB {
         }
     }
 
-    pub fn largest_axis(&self) -> Axis {
+    #[inline]
+    pub fn extend(&mut self, other: &Self) {
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+    }
+
+    pub fn largest_axis(&self) -> Vec3 {
         let size = self.max - self.min;
         if size.x() >= size.y() && size.x() >= size.z() {
-            return Axis::X;
+            return Vec3::unit_x();
         } else if size.y() >= size.x() && size.y() >= size.z() {
-            return Axis::Y;
+            return Vec3::unit_y();
         } else {
-            return Axis::Z;
+            return Vec3::unit_z();
         }
+    }
+
+    pub fn center(&self) -> Vec3 {
+        0.5 * (self.min + self.max)
     }
 
     pub fn get_min(&self) -> Vec3 {

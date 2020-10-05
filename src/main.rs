@@ -6,6 +6,7 @@ mod globals;
 mod material;
 mod math;
 mod pipelines;
+mod traits;
 
 use futures::executor::block_on;
 use winit::{

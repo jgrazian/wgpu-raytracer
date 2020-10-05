@@ -5,10 +5,10 @@ use winit::{event::WindowEvent, window::Window};
 
 use crate::bvh::BVH;
 use crate::geometry;
-use crate::geometry::Buffer;
 use crate::globals;
 use crate::material;
 use crate::pipelines::*;
+use crate::traits::*;
 
 struct MouseState {
     state: winit::event::ElementState,
@@ -27,11 +27,10 @@ pub struct State {
     globals: globals::Globals,
     spheres: Vec<geometry::Sphere>,
     materials: Vec<material::Material>,
-    bvh: BVH<geometry::Sphere>,
+    bvh: BVH,
 
     globals_buffer: wgpu::Buffer,
     output_texture: wgpu::TextureView,
-    spheres_buffer: wgpu::Buffer,
     material_buffer: wgpu::Buffer,
     bvh_buffer: wgpu::Buffer,
 
@@ -124,42 +123,27 @@ impl State {
 
         let mut spheres = vec![
             geometry::Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 0),
-            //geometry::Sphere::new(Vec3::new(0.0, 1010.0, 0.0), 1000.0, 0),
-            //geometry::Sphere::new(Vec3::new(1005.0, 0.0, 0.0), 1000.0, 6),
-            //geometry::Sphere::new(Vec3::new(-1005.0, 0.0, 0.0), 1000.0, 7),
-            //geometry::Sphere::new(Vec3::new(0.0, 0.0, -1005.0), 1000.0, 4),
-            //geometry::Sphere::new(Vec3::new(0.0, 0.0, 1005.0), 1000.0, 4),
             geometry::Sphere::new(Vec3::new(3.0, 4.0, -3.0), 0.5, 3),
         ];
         spheres.append(&mut make_sphereflake());
-
-        let spheres_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: spheres.to_buffer().as_slice(),
-            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-        });
-
         println!("{:?}", spheres.len());
-        let bvh = BVH::from_objects(&spheres);
+
+        let bvh = BVH::from_spheres(spheres.as_slice());
         let bvh_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bvh.to_buffer().as_slice(),
+            contents: bytemuck::cast_slice(&bvh.as_bytes()),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
         let materials = vec![
             material::Material::new([1.0, 1.0, 1.0], 0, false),
-            material::Material::new([0.5, 0.5, 0.5], 1, false),
+            material::Material::new([1.0, 1.0, 1.0], 1, false),
             material::Material::new([1.0, 1.0, 1.0], 2, false),
             material::Material::new([4.0, 4.0, 4.0], 0, true),
-            material::Material::new([0.9, 0.9, 0.9], 0, false),
-            material::Material::new([0.2, 0.1, 0.9], 0, false),
-            material::Material::new([1.0, 0.0, 0.0], 0, false),
-            material::Material::new([0.0, 1.0, 0.0], 0, false),
         ];
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: materials.to_buffer().as_slice(),
+            contents: &materials.as_bytes(),
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -182,7 +166,6 @@ impl State {
             bvh,
             globals_buffer,
             output_texture,
-            spheres_buffer,
             material_buffer,
             bvh_buffer,
             compute_pipeline,
@@ -308,14 +291,10 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Buffer(self.spheres_buffer.slice(..)),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
                     resource: wgpu::BindingResource::Buffer(self.material_buffer.slice(..)),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: wgpu::BindingResource::Buffer(self.bvh_buffer.slice(..)),
                 },
             ],
@@ -382,7 +361,7 @@ fn make_sphereflake() -> Vec<geometry::Sphere> {
 }
 
 fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Sphere> {
-    const max_depth: u32 = 2;
+    const MAX_DEPTH: u32 = 3;
 
     let mat = match depth % 2 {
         0 => 1,
@@ -390,7 +369,7 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
     };
     let mut s = vec![geometry::Sphere::new(pos, r, mat)];
 
-    if depth == max_depth {
+    if depth == MAX_DEPTH {
         return s;
     }
 
@@ -427,15 +406,3 @@ fn sphereflake(pos: Vec3, axis: Vec3, r: f32, depth: u32) -> Vec<geometry::Spher
 
     s
 }
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-struct Pixel {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-}
-
-unsafe impl bytemuck::Zeroable for Pixel {}
-unsafe impl bytemuck::Pod for Pixel {}

@@ -1,222 +1,243 @@
-use crate::aabb::{Axis, Bounded, AABB};
-use crate::geometry::Buffer;
-use std::marker::PhantomData;
+use crate::aabb::{Bounded, AABB};
+use crate::geometry::Sphere;
+use crate::traits::AsBytes;
+use glam::Vec3;
 
 // https://www.ks.uiuc.edu/Research/vmd/projects/ece498/raytracing/GPU_BVHthesis.pdf
-
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
-enum NodeType {
-    Node = 0,
-    Leaf = 1,
+pub enum Leaf {
+    S(Sphere),
 }
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Node {
+    bb_min: Vec3,
+    node_type: u32,
+    bb_max: Vec3,
+    esc_index: u32,
+}
+unsafe impl bytemuck::Pod for Node {}
+unsafe impl bytemuck::Zeroable for Node {}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub enum BVHElement {
+    Node(Node),
+    Leaf(Leaf),
+}
+unsafe impl bytemuck::Pod for BVHElement {}
+unsafe impl bytemuck::Zeroable for BVHElement {}
 
 #[derive(Debug)]
-struct Node {
-    bounds: AABB,
-    node_type: NodeType,
-    ptr: u32,
+pub struct BVH {
+    pub nodes: Vec<BVHElement>,
 }
 
-#[derive(Debug)]
-pub struct BVH<T: Bounded> {
-    nodes: Vec<Node>,
-    phantom: PhantomData<T>,
-}
-
-impl<T: Bounded + std::fmt::Debug> BVH<T> {
-    pub fn from_objects(objects: &Vec<T>) -> Self {
-        // Create outermost bounding-box
-        let mut bounds = objects[0].get_bounds();
+impl BVH {
+    pub fn from_spheres(objects: &[Sphere]) -> Self {
+        let mut leaves = Vec::with_capacity(objects.len());
         for obj in objects {
-            bounds = AABB::union(&bounds, &obj.get_bounds());
+            leaves.push(Leaf::S(*obj));
         }
 
-        // 0th node
-        let mut nodes = vec![Node::new(bounds, NodeType::Node, 0)];
-
-        // Split into left/right
-        let index = (0..objects.len() as u32).collect();
-        let objects = objects.iter().collect();
-        let (l_obj, l_ind, r_obj, r_ind) =
-            Self::split_on_axis(&bounds.largest_axis(), &bounds, &objects, &index);
-
-        // Recurse
-        let mut left_nodes = Self::make_bvh(&l_obj, &l_ind, 1);
-        nodes.append(&mut left_nodes);
-        let mut right_nodes = Self::make_bvh(&r_obj, &r_ind, nodes.len() as u32);
-        nodes.append(&mut right_nodes);
-
-        nodes[0] = Node::new(bounds, NodeType::Node, nodes.len() as u32);
-
-        BVH {
-            nodes,
-            phantom: PhantomData,
-        }
+        Self::new(leaves.as_slice())
     }
 
-    fn make_bvh(objects: &Vec<&T>, index: &Vec<u32>, ptr: u32) -> Vec<Node> {
-        let mut bounds = objects[0].get_bounds();
+    pub fn new(objects: &[Leaf]) -> Self {
+        let mut index: Vec<usize> = (0..objects.len()).collect();
+        let mut nodes: Vec<BVHElement> = Vec::with_capacity(objects.len() * 2);
 
-        // Only 1 object left it is a leaf
-        if objects.len() == 1 {
-            return vec![Node::new(bounds, NodeType::Leaf, index[0])];
-        }
+        Self::build_node(&mut nodes, objects, &mut index, 1);
 
-        let mut nodes = vec![Node::new(bounds, NodeType::Node, ptr)];
-
-        for obj in objects {
-            bounds = AABB::union(&bounds, &obj.get_bounds());
-        }
-
-        let split_axis = bounds.largest_axis();
-        let (mut l_obj, mut l_ind, mut r_obj, mut r_ind) =
-            Self::split_on_axis(&split_axis, &bounds, objects, index);
-
-        match (l_obj.len() > 0, r_obj.len() > 0) {
-            (false, true) => {
-                l_obj = r_obj[0..r_obj.len() / 2].to_vec();
-                l_ind = r_ind[0..r_ind.len() / 2].to_vec();
-                r_obj = r_obj[r_obj.len() / 2..].to_vec();
-                r_ind = r_ind[r_ind.len() / 2..].to_vec();
+        let nodes_len = nodes.len() as u32;
+        for node in nodes.iter_mut() {
+            if node.get_esc_index() >= nodes_len {
+                node.set_esc_index(0xFFFFFFFF);
             }
-            (true, false) => {
-                l_obj = l_obj[0..l_obj.len() / 2].to_vec();
-                l_ind = l_ind[0..l_ind.len() / 2].to_vec();
-                r_obj = l_obj[l_obj.len() / 2..].to_vec();
-                r_ind = l_ind[l_ind.len() / 2..].to_vec();
-            }
-            _ => (),
         }
 
-        let mut left_nodes = Self::make_bvh(&l_obj, &l_ind, ptr + 1);
-        nodes.append(&mut left_nodes);
-        let mut right_nodes = Self::make_bvh(&r_obj, &r_ind, ptr + nodes.len() as u32);
-        nodes.append(&mut right_nodes);
-
-        nodes[0] = Node::new(bounds, NodeType::Node, ptr + nodes.len() as u32);
-
-        nodes
+        BVH { nodes }
     }
 
-    fn split_on_axis<'a>(
-        axis: &Axis,
-        bounds: &AABB,
-        objects: &'a Vec<&T>,
-        index: &Vec<u32>,
-    ) -> (Vec<&'a T>, Vec<u32>, Vec<&'a T>, Vec<u32>) {
-        let mut left_objects: Vec<&T> = Vec::new();
-        let mut left_index: Vec<u32> = Vec::new();
-        let mut right_objects: Vec<&T> = Vec::new();
-        let mut right_index: Vec<u32> = Vec::new();
-
-        match axis {
-            Axis::X => {
-                let mid = 0.5 * (bounds.min_x() + bounds.max_x());
-                for (i, obj) in (&objects).iter().enumerate() {
-                    let above = obj.get_bounds().max_x() - mid;
-                    let below = mid - obj.get_bounds().min_x();
-                    if above >= below {
-                        left_objects.push(obj);
-                        left_index.push(index[i]);
-                    } else {
-                        right_objects.push(obj);
-                        right_index.push(index[i]);
-                    }
-                }
-            }
-            Axis::Y => {
-                let mid = 0.5 * (bounds.min_y() + bounds.max_y());
-                for (i, obj) in (&objects).iter().enumerate() {
-                    let above = obj.get_bounds().max_y() - mid;
-                    let below = mid - obj.get_bounds().min_y();
-                    if above >= below {
-                        left_objects.push(obj);
-                        left_index.push(index[i]);
-                    } else {
-                        right_objects.push(obj);
-                        right_index.push(index[i]);
-                    }
-                }
-            }
-            Axis::Z => {
-                let mid = 0.5 * (bounds.min_z() + bounds.max_z());
-                for (i, obj) in (&objects).iter().enumerate() {
-                    let above = obj.get_bounds().max_z() - mid;
-                    let below = mid - obj.get_bounds().min_z();
-                    if above >= below {
-                        left_objects.push(obj);
-                        left_index.push(index[i]);
-                    } else {
-                        right_objects.push(obj);
-                        right_index.push(index[i]);
-                    }
-                }
-            }
+    fn build_node(
+        nodes: &mut Vec<BVHElement>,
+        objects: &[Leaf],
+        index: &mut Vec<usize>,
+        esc_index: u32,
+    ) -> usize {
+        if index.len() == 1 {
+            nodes.push(objects[index[0]].as_element(esc_index));
+            return 1;
         }
 
-        (left_objects, left_index, right_objects, right_index)
+        let mut bounds = objects[index[0]].get_bounds();
+        for i in index.iter() {
+            bounds.extend(&objects[*i].get_bounds());
+        }
+
+        let (mut li, mut ri) = Self::split(objects, index, &bounds);
+
+        nodes.push(BVHElement::Node(Node {
+            bb_min: bounds.min,
+            node_type: 0xFFFFFFFF,
+            bb_max: bounds.max,
+            esc_index: 0,
+        }));
+
+        let start_index = nodes.len() - 1;
+
+        let num_l = Self::build_node(nodes, objects, &mut li, esc_index + 1);
+        let num_r = Self::build_node(nodes, objects, &mut ri, esc_index + num_l as u32 + 1);
+
+        let e = (start_index + num_l + num_r + 1) as u32;
+        nodes[start_index].set_esc_index(e);
+        if num_r == 1 {
+            nodes[start_index + num_l + 1].set_esc_index(e);
+        }
+
+        num_l + num_r + 1
+    }
+
+    fn split<'a>(
+        objects: &'a [Leaf],
+        index: &'a mut Vec<usize>,
+        bounds: &'a AABB,
+    ) -> (Vec<usize>, Vec<usize>) {
+        let bounds_axis = bounds.largest_axis();
+
+        let sort = |a: &usize, b: &usize| {
+            let axis0 = axis_size(objects[*a].get_bounds().center(), bounds_axis);
+            let axis1 = axis_size(objects[*b].get_bounds().center(), bounds_axis);
+
+            axis0.partial_cmp(&axis1).unwrap()
+        };
+
+        index.sort_by(sort);
+
+        let (l, r) = index.split_at(index.len() / 2);
+        (l.to_vec(), r.to_vec())
     }
 }
 
-impl<T: Bounded> Buffer for BVH<T> {
-    fn to_buffer(&self) -> Vec<u8> {
-        let mut flat: Vec<u8> = Vec::new();
+fn axis_size(v: Vec3, axis: Vec3) -> f32 {
+    let d = v * axis;
+    match (d.x() != 0.0, d.y() != 0.0, d.z() != 0.0) {
+        (true, false, false) => return d.x(),
+        (false, true, false) => return d.y(),
+        (false, false, true) => return d.z(),
+        _ => return 0.0,
+    }
+}
 
-        flat.extend_from_slice(bytemuck::cast_slice(&[self.nodes.len() as u32]));
-        flat.extend_from_slice(bytemuck::cast_slice(&[0 as u32; 3]));
+impl Bounded for Leaf {
+    fn get_bounds(&self) -> AABB {
+        match self {
+            Leaf::S(s) => s.get_bounds(),
+        }
+    }
+}
+
+impl Bounded for BVHElement {
+    fn get_bounds(&self) -> AABB {
+        return match self {
+            BVHElement::Node(n) => AABB {
+                min: n.bb_min,
+                max: n.bb_max,
+            },
+            BVHElement::Leaf(l) => l.get_bounds(),
+        };
+    }
+}
+
+impl Leaf {
+    fn as_element(&self, esc_index: u32) -> BVHElement {
+        return match self {
+            Leaf::S(s) => BVHElement::Leaf(Leaf::S(Sphere { esc_index, ..*s })),
+        };
+    }
+}
+
+impl BVHElement {
+    fn set_esc_index(&mut self, esc_index: u32) {
+        match self {
+            BVHElement::Node(n) => n.esc_index = esc_index,
+            BVHElement::Leaf(l) => match l {
+                Leaf::S(s) => s.esc_index = esc_index,
+            },
+        }
+    }
+
+    fn get_esc_index(&self) -> u32 {
+        return match self {
+            BVHElement::Node(n) => n.esc_index,
+            BVHElement::Leaf(l) => match l {
+                Leaf::S(s) => s.esc_index,
+            },
+        };
+    }
+}
+
+impl AsBytes for BVH {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
 
         for node in &self.nodes {
-            flat.extend_from_slice(bytemuck::cast_slice(&[
-                node.bounds.min_x(),
-                node.bounds.min_y(),
-                node.bounds.min_z(),
-            ]));
-            flat.extend_from_slice(bytemuck::cast_slice(&[node.node_type as u32]));
-
-            flat.extend_from_slice(bytemuck::cast_slice(&[
-                node.bounds.max_x(),
-                node.bounds.max_y(),
-                node.bounds.max_z(),
-            ]));
-            flat.extend_from_slice(bytemuck::cast_slice(&[node.ptr]));
+            match node {
+                BVHElement::Node(n) => bytes.extend_from_slice(bytemuck::bytes_of(n)),
+                BVHElement::Leaf(l) => match l {
+                    Leaf::S(s) => bytes.extend_from_slice(bytemuck::bytes_of(s)),
+                },
+            };
         }
 
-        flat
+        bytes
     }
 
-    fn buffer_size(&self) -> usize {
-        32 * self.nodes.len() + 16
-    }
-}
-
-impl Node {
-    fn new(bounds: AABB, node_type: NodeType, ptr: u32) -> Self {
-        Node {
-            bounds,
-            node_type,
-            ptr,
-        }
+    fn bytes_size(&self) -> usize {
+        0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::Sphere;
-    use glam::Vec3;
+
+    struct State {
+        a: u32,
+    }
+    fn xorshift32(state: &mut State) -> u32 {
+        let mut x = state.a;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        state.a = x;
+        x
+    }
+    fn randf(state: &mut State) -> f32 {
+        (xorshift32(state) as f32) / (u32::MAX as f32)
+    }
+    fn rng(state: &mut State, r: f32) -> f32 {
+        randf(state) * r
+    }
 
     #[test]
-    fn test_make_bvh() {
-        let s1 = Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0, 0);
-        let s2 = Sphere::new(Vec3::new(-1.5, 0.0, 0.0), 1.0, 0);
-        let s3 = Sphere::new(Vec3::new(1.5, 1.5, 0.0), 1.0, 0);
-        let s4 = Sphere::new(Vec3::new(1.5, 3.0, 0.0), 1.0, 0);
-        let s5 = Sphere::new(Vec3::new(-1.5, 1.5, 0.0), 1.0, 0);
+    fn test() {
+        let mut s = State { a: 35924 };
+        let mut objects = Vec::with_capacity(1_000_000);
+        for _ in 0..1_000_000 {
+            objects.push(Leaf::S(Sphere {
+                center: Vec3::new(rng(&mut s, 100.0), rng(&mut s, 100.0), rng(&mut s, 100.0)),
+                radius: 1.0,
+                mat_index: 1,
+                pad0: [0.0, 0.0],
+                esc_index: 0,
+            }))
+        }
+        println!("Made spheres");
 
-        let objs = vec![s1, s2, s3, s4, s5];
-
-        let bvh = BVH::from_objects(&objs);
-
+        let bvh = BVH::new(objects.as_mut_slice());
         println!("{:?}", bvh);
     }
 }

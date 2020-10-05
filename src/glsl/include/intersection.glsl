@@ -30,9 +30,9 @@ bool hit_sphere(Sphere s, Ray r, float t_min, float t_max, inout HitRec rec) {
     return true;
 }
 
-bool hit_box(BVHNode b, Ray r) {
-    vec3 tbot = r.inv_direction * (b.min - r.origin);
-    vec3 ttop = r.inv_direction * (b.max - r.origin);
+bool hit_box(BVHNode b, Ray r, vec3 inv_dir) {
+    vec3 tbot = inv_dir * (b.min.xyz - r.origin);
+    vec3 ttop = inv_dir * (b.max.xyz - r.origin);
     vec3 tmin = min(ttop, tbot);
     vec3 tmax = max(ttop, tbot);
     vec2 t = max(tmin.xx, tmin.yz);
@@ -47,24 +47,35 @@ bool hit_world(Ray r, float t_min, float t_max, inout HitRec rec) {
     HitRec temp_rec;
     bool hit_anything = false;
     float closest_so_far = t_max;
+    const vec3 inv_dir = 1 / r.direction;
 
-    uint cur_index = 0;
-    BVHNode cur_node;
+    BVHNode node;
+    uint node_index = 0;
 
-    while (cur_index < bvh.len) {
-        cur_node = bvh.data[cur_index];
-        if (hit_box(cur_node, r)) {
-            cur_index = cur_index + 1;
-            if (cur_node.type == 1) {
-                if (hit_sphere(spheres.data[cur_node.ptr], r, t_min, closest_so_far, temp_rec)) {
-                    hit_anything = true;
-                    closest_so_far = temp_rec.t;
-                    rec = temp_rec;
-                } 
-            }
-        } else {
-            cur_index = (cur_node.type == 0) ? cur_node.ptr : cur_index + 1;
+    while (node_index != 0xFFFFFFFF) {
+        node.min = bvh.nodes[2*node_index + 0];
+        node.max = bvh.nodes[2*node_index + 1];
+
+        uint shape_type = floatBitsToUint(node.min.w);
+
+        if (shape_type != 0xFFFFFFFF) { //Hit a shape
+            Sphere s;
+            s.center = node.min.xyz;
+            s.radius = node.min.w;
+            s.mat_ptr = floatBitsToUint(node.max.x);
+            
+            if (hit_sphere(s, r, t_min, closest_so_far, temp_rec)) {
+                hit_anything = true;
+                closest_so_far = temp_rec.t;
+                rec = temp_rec;
+            } 
+
+        } else if (hit_box(node, r, inv_dir)) {
+            node_index += 1;
+			continue;
         }
+
+        node_index = floatBitsToUint(node.max.w);
     }
 
     return hit_anything;

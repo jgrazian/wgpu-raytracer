@@ -1,4 +1,4 @@
-use crate::geometry::Buffer;
+use crate::traits::AsBytes;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -20,8 +20,8 @@ impl Material {
     }
 }
 
-impl Buffer for Vec<Material> {
-    fn to_buffer(&self) -> Vec<u8> {
+impl AsBytes for Vec<Material> {
+    fn as_bytes(&self) -> Vec<u8> {
         let mut flat: Vec<u8> = vec![];
         flat.extend_from_slice(&mut bytemuck::cast_slice(&[self.len() as u32]));
         flat.extend_from_slice(&mut bytemuck::cast_slice(&[0.0 as u32; 3]));
@@ -36,7 +36,7 @@ impl Buffer for Vec<Material> {
         flat
     }
 
-    fn buffer_size(&self) -> usize {
+    fn bytes_size(&self) -> usize {
         (std::mem::size_of::<Material>() + 12) * self.len() + 16
     }
 }

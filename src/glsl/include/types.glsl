@@ -19,8 +19,6 @@ struct Sphere {
 };
 
 struct BVHNode {
-    vec3 min;
-    uint type;
-    vec3 max;
-    uint ptr;
+    vec4 min;
+    vec4 max;
 };

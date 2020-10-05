@@ -34,20 +34,9 @@ impl ComputePipeline {
                     },
                     count: None,
                 },
-                // Spheres
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStage::COMPUTE,
-                    ty: wgpu::BindingType::StorageBuffer {
-                        dynamic: false,
-                        readonly: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
                 // Materials
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: wgpu::ShaderStage::COMPUTE,
                     ty: wgpu::BindingType::UniformBuffer {
                         dynamic: false,
@@ -57,7 +46,7 @@ impl ComputePipeline {
                 },
                 // BVH
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 3,
                     visibility: wgpu::ShaderStage::COMPUTE,
                     ty: wgpu::BindingType::StorageBuffer {
                         dynamic: false,

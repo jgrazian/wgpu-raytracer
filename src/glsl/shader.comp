@@ -32,7 +32,7 @@ vec3 ray_color(Ray r, inout uvec3 seed) {
             target = rec.point + reflect(unit_direction, rec.normal);
         // dielectric
         } else if (mat_type == 2) {
-            float ref_idx = 1.75;
+            float ref_idx = 2.4;
             float eta = rec.front_face ? (1.0 / ref_idx) : ref_idx;
 
             float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
@@ -55,7 +55,6 @@ vec3 ray_color(Ray r, inout uvec3 seed) {
         
         r.origin = rec.point;
         r.direction = normalize(target - rec.point);
-        r.inv_direction = 1 / r.direction;
         
         depth++;
 
@@ -99,7 +98,7 @@ void main() {
 
     // Main loop
     vec3 ray_dir = normalize(upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - look_from);
-    Ray r = Ray(look_from, ray_dir, 1 / ray_dir);
+    Ray r = Ray(look_from, ray_dir);
     vec3 pixel_color = ray_color(r, seed);
 
     // Output
