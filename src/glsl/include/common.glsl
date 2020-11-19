@@ -24,6 +24,14 @@ float hash(uvec3 x) {
     return hash3(x).x;
 }
 
+vec2 rand2(uvec3 x) {
+    return (2.0 * hash2(x)) - 1.0;
+}
+
+float randf(uvec3 x, float min, float max) {
+    return min + (max-min) * hash(x);
+}
+
 vec3 sample_sphere_uniform(vec2 s) {
     float phi = M_TWO_PI * s.x;
     float cos_theta = 1.0 - 2.0 * s.y;
@@ -38,6 +46,16 @@ vec3 random_in_hemisphere(vec3 normal, vec2 s) {
         return in_unit_sphere;
     } else {
         return -in_unit_sphere;
+    }
+}
+
+vec2 random_in_unit_disk(uvec3 x) {
+    while (true) {
+        vec2 p = rand2(x);
+        if (p.x * p.x + p.y * p.y > 1) {
+            continue;
+        }
+        return p;
     }
 }
 

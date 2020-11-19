@@ -92,11 +92,17 @@ impl State {
         // ---- Buffers ----
         let viewport_height = 2.0;
         let ar = size.width as f32 / size.height as f32;
+        let look_from = Vec3::new(0.0, 3.0, -3.0);
+        let look_at = Vec3::new(0.0, 1.0, 0.0);
         let globals = globals::Globals {
-            camera_pos: Vec3::new(0.0, 4.0, 4.0),
+            look_from,
+            vfov: 90.0,
+            look_at,
+            aspect_ratio: ar,
+            aperture: 0.005,
+            focus_dist: (look_from - look_at).length(),
             viewport: Vec2::new(ar * viewport_height, viewport_height),
             window_size: Vec2::new(size.width as f32, size.height as f32),
-            aspect_ratio: ar,
             rng_seed: rand::random(),
             num_frames: 0,
         };
@@ -123,7 +129,10 @@ impl State {
 
         let mut spheres = vec![
             geometry::Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 0),
-            geometry::Sphere::new(Vec3::new(3.0, 4.0, -3.0), 0.5, 3),
+            // geometry::Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0, 1),
+            // geometry::Sphere::new(Vec3::new(2.0, 1.0, 0.0), 1.0, 2),
+            // geometry::Sphere::new(Vec3::new(-2.0, 1.0, 0.0), 1.0, 4),
+            geometry::Sphere::new(Vec3::new(3.0, 8.0, -3.0), 2.0, 3),
         ];
         spheres.append(&mut make_sphereflake());
         println!("{:?}", spheres.len());
@@ -136,10 +145,12 @@ impl State {
         });
 
         let materials = vec![
-            material::Material::new([1.0, 1.0, 1.0], 0, false),
+            material::Material::new([0.8, 0.8, 0.8], 0, false),
             material::Material::new([1.0, 1.0, 1.0], 1, false),
             material::Material::new([1.0, 1.0, 1.0], 2, false),
             material::Material::new([4.0, 4.0, 4.0], 0, true),
+            material::Material::new([0.0, 0.0, 0.7], 0, false),
+            material::Material::new([0.6, 0.3, 0.3], 0, false),
         ];
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -186,12 +197,12 @@ impl State {
         let viewport_height = 2.0;
         let ar = new_size.width as f32 / new_size.height as f32;
         self.globals = globals::Globals {
-            camera_pos: self.globals.camera_pos,
             viewport: Vec2::new(ar * viewport_height, viewport_height),
             window_size: Vec2::new(new_size.width as f32, new_size.height as f32),
             aspect_ratio: ar,
             rng_seed: rand::random(),
             num_frames: 0,
+            ..self.globals
         };
 
         let output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -228,6 +239,28 @@ impl State {
                     self.dirty = true;
                     self.globals.arcball_zoom(*y);
                 }
+                _ => return false,
+            },
+            WindowEvent::KeyboardInput { input, .. } => match input.virtual_keycode {
+                Some(k) => match k {
+                    winit::event::VirtualKeyCode::W => {
+                        self.dirty = true;
+                        self.globals.arcball_translate((1, 0))
+                    }
+                    winit::event::VirtualKeyCode::S => {
+                        self.dirty = true;
+                        self.globals.arcball_translate((-1, 0))
+                    }
+                    winit::event::VirtualKeyCode::A => {
+                        self.dirty = true;
+                        self.globals.arcball_translate((0, 1))
+                    }
+                    winit::event::VirtualKeyCode::D => {
+                        self.dirty = true;
+                        self.globals.arcball_translate((0, -1))
+                    }
+                    _ => return false,
+                },
                 _ => return false,
             },
             _ => return false,

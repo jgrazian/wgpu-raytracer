@@ -5,6 +5,7 @@ precision highp float;
 #include "ray.glsl"
 #include "types.glsl"
 #include "buffers.glsl"
+#include "camera.glsl"
 #include "intersection.glsl"
 
 // -------------
@@ -32,7 +33,7 @@ vec3 ray_color(Ray r, inout uvec3 seed) {
             target = rec.point + reflect(unit_direction, rec.normal);
         // dielectric
         } else if (mat_type == 2) {
-            float ref_idx = 2.4;
+            float ref_idx = 1.5;
             float eta = rec.front_face ? (1.0 / ref_idx) : ref_idx;
 
             float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
@@ -78,27 +79,34 @@ void main() {
     const vec2 uv = vec2(pixel_coordinates) / image_size;
     uvec3 seed = uvec3(pixel_coordinates, globals.num_frames);
 
-    const vec2 sample_pos = (vec2(pixel_coordinates) + hash2(seed)) / image_size;
+    const vec2 sample_pos = (vec2(pixel_coordinates) + rand2(seed)) / image_size;
 
     if (gl_GlobalInvocationID.x >= image_size.x || gl_GlobalInvocationID.y >= image_size.y) {
         return;
     }
 
     // Camera
-    const vec3 look_at = vec3(0.0, 1.0, 0.0);
-    const vec3 look_from = globals.camera_origin;
-    const vec3 vup = vec3(0.0, 1.0, 0.0);
+    float theta = radians(globals.vfov);
+    float h = tan(theta / 2.0);
+    float viewport_height = 2.0 * h;
+    float viewport_width = globals.aspect_ratio * viewport_height;
 
-    vec3 w = normalize(look_from - look_at);
-    vec3 uu = normalize(cross(vup, w));
-    vec3 vv = cross(w, uu);
-    vec3 horizontal = globals.viewport.x * uu;
-    vec3 vertical = globals.viewport.y * vv;
-    vec3 upper_left_corner = look_from - horizontal/2.0 + vertical/2.0 - w;
+    vec3 vup = vec3(0.0, 1.0, 0.0);
 
-    // Main loop
-    vec3 ray_dir = normalize(upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - look_from);
-    Ray r = Ray(look_from, ray_dir);
+    vec3 w = normalize(globals.look_from - globals.look_at);
+    vec3 u = normalize(cross(vup, w));
+    vec3 v = cross(w, u);
+    vec3 horizontal = globals.focus_dist * viewport_width * u;
+    vec3 vertical = globals.focus_dist * viewport_height * v;
+    vec3 upper_left_corner = globals.look_from - 0.5*horizontal + 0.5*vertical - globals.focus_dist*w;
+
+    vec2 rd = 0.5 * globals.aperture * random_in_unit_disk(seed);
+    vec3 offset = u * rd.x + v * rd.y;
+
+    // Shoot ray
+    vec3 ray_dir = normalize(upper_left_corner + sample_pos.x*horizontal - sample_pos.y*vertical - globals.look_from - offset);
+    Ray r = Ray(globals.look_from + offset, ray_dir);
+
     vec3 pixel_color = ray_color(r, seed);
 
     // Output

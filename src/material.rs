@@ -26,7 +26,6 @@ impl AsBytes for Vec<Material> {
         flat.extend_from_slice(&mut bytemuck::cast_slice(&[self.len() as u32]));
         flat.extend_from_slice(&mut bytemuck::cast_slice(&[0.0 as u32; 3]));
         for i in 0..self.len() {
-            //flat.extend_from_slice(bytemuck::cast_slice(&[self[i]])); // 0, 1, 2, 3, 4
             flat.extend_from_slice(bytemuck::cast_slice(&[self[i].albedo]));
             flat.extend_from_slice(bytemuck::cast_slice(&[self[i].type_flag]));
             flat.extend_from_slice(bytemuck::cast_slice(&[self[i].is_light as u32]));

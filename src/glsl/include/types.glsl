@@ -1,3 +1,12 @@
+struct Camera {
+    vec3 look_from;
+    float vfov;
+    vec3 look_at;
+    float aspect_ratio;
+    float aperture;
+    float focus_dist;
+};
+
 struct Material {
     vec3 albedo;
     uint type;
